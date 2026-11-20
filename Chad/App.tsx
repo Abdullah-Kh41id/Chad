@@ -244,35 +244,45 @@ export default function App() {
   }
 
   return (
-    <ScrollView contentContainerStyle={styles.container} keyboardShouldPersistTaps="handled">
-      <Text style={styles.title}>Chad is ready</Text>
-      <Text style={styles.sub}>Your lists are saved.</Text>
-      <Button title="SEND TEST MESSAGE FROM CHAD" onPress={sendRealTest} />
-      <View style={{ height: 12 }} />
-      <Button title="Schedule Daily Messages" onPress={onScheduleDaily} />
+    <ScrollView
+      style={styles.homeScreen}
+      contentContainerStyle={styles.homeContent}
+      keyboardShouldPersistTaps="handled"
+    >
+      <Text style={styles.homeTitle}>Chad is ready</Text>
+      <Text style={styles.homeSub}>Your lists are saved.</Text>
+
+      <Pressable style={styles.accentButton} onPress={sendRealTest}>
+        <Text style={styles.accentButtonText}>SEND TEST MESSAGE FROM CHAD</Text>
+      </Pressable>
+      <Pressable style={[styles.accentButton, styles.accentButtonSecondary]} onPress={onScheduleDaily}>
+        <Text style={styles.accentButtonText}>Schedule Daily Messages</Text>
+      </Pressable>
 
       <View style={styles.sectionHeader}>
         <Text style={styles.sectionTitle}>Anti-Vision</Text>
-        <Pressable onPress={() => openEdit('antiVision')}>
+        <Pressable onPress={() => openEdit('antiVision')} hitSlop={8}>
           <Text style={styles.editLink}>Edit</Text>
         </Pressable>
       </View>
       {antiList.map((item, i) => (
-        <Text key={`anti-${i}`} style={styles.item}>
-          • {item}
-        </Text>
+        <View key={`anti-${i}`} style={styles.card}>
+          <Text style={styles.cardBullet}>•</Text>
+          <Text style={styles.cardText}>{item}</Text>
+        </View>
       ))}
 
       <View style={styles.sectionHeader}>
         <Text style={styles.sectionTitle}>Vision</Text>
-        <Pressable onPress={() => openEdit('vision')}>
+        <Pressable onPress={() => openEdit('vision')} hitSlop={8}>
           <Text style={styles.editLink}>Edit</Text>
         </Pressable>
       </View>
       {visionList.map((item, i) => (
-        <Text key={`vision-${i}`} style={styles.item}>
-          • {item}
-        </Text>
+        <View key={`vision-${i}`} style={styles.card}>
+          <Text style={styles.cardBullet}>•</Text>
+          <Text style={styles.cardText}>{item}</Text>
+        </View>
       ))}
     </ScrollView>
   );
@@ -284,15 +294,42 @@ const styles = StyleSheet.create({
   sub: { fontSize: 16, marginBottom: 20, color: '#555' },
   input: { borderWidth: 1, borderColor: '#ccc', padding: 12, marginBottom: 10, borderRadius: 8 },
   item: { fontSize: 16, marginVertical: 4 },
+  homeScreen: { flex: 1, backgroundColor: '#0f0f0f' },
+  homeContent: { flexGrow: 1, padding: 20, paddingTop: 60, paddingBottom: 40 },
+  homeTitle: { fontSize: 28, fontWeight: 'bold', marginBottom: 8, color: '#ffffff' },
+  homeSub: { fontSize: 16, marginBottom: 24, color: '#b0b0b0' },
+  accentButton: {
+    backgroundColor: '#007AFF',
+    borderRadius: 10,
+    paddingVertical: 14,
+    paddingHorizontal: 16,
+    alignItems: 'center',
+    marginBottom: 12,
+  },
+  accentButtonSecondary: { marginBottom: 8 },
+  accentButtonText: { color: '#ffffff', fontSize: 15, fontWeight: '700', letterSpacing: 0.2 },
   sectionHeader: {
-    marginTop: 30,
-    marginBottom: 8,
+    marginTop: 28,
+    marginBottom: 12,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
   },
-  sectionTitle: { fontSize: 18, fontWeight: 'bold' },
-  editLink: { color: '#1a73e8', fontSize: 16, fontWeight: '600' },
+  sectionTitle: { fontSize: 18, fontWeight: 'bold', color: '#ffffff' },
+  editLink: { color: '#007AFF', fontSize: 16, fontWeight: '600' },
+  card: {
+    backgroundColor: '#1a1a1a',
+    borderRadius: 10,
+    paddingVertical: 14,
+    paddingHorizontal: 14,
+    marginBottom: 8,
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    borderWidth: 1,
+    borderColor: '#2a2a2a',
+  },
+  cardBullet: { color: '#007AFF', fontSize: 16, marginRight: 10, marginTop: 1 },
+  cardText: { flex: 1, color: '#ffffff', fontSize: 16, lineHeight: 22 },
   editList: { flexGrow: 0, maxHeight: 360, marginBottom: 12 },
   editRow: { flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 4 },
   editInput: { flex: 1, marginBottom: 0 },
