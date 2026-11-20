@@ -24,8 +24,8 @@ async function requestNotificationPermission(): Promise<boolean> {
 }
 
 /**
- * Schedules five repeating local Chad notifications.
- * Uses the same permission + cancel-all + scheduleNotificationAsync flow as the debug test.
+ * Same reliable flow as the short-delay test:
+ * request permission → cancel all → scheduleNotificationAsync → verify with getAll.
  */
 export async function scheduleDailyChadMessages(): Promise<ScheduleResult> {
   try {
@@ -51,18 +51,20 @@ export async function scheduleDailyChadMessages(): Promise<ScheduleResult> {
       const body = generateMessageByKind(slot.kind, vision, antiVision);
       bodies.push(body);
 
+      // Same scheduleNotificationAsync path as the working short-delay test.
+      // Requested shape: { hour, minute, repeats: true }. SDK 58 also requires `type`.
       await Notifications.scheduleNotificationAsync({
         content: {
           title: 'Chad',
           body,
           sound: 'default',
         },
-        // Daily repeating trigger (hour/minute). SDK 58 requires an explicit type.
         trigger: {
           type: Notifications.SchedulableTriggerInputTypes.DAILY,
           hour: slot.hour,
           minute: slot.minute,
-        },
+          repeats: true,
+        } as Notifications.NotificationTriggerInput,
       });
     }
 

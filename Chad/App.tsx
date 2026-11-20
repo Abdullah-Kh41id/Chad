@@ -156,13 +156,7 @@ export default function App() {
         alert('Could not schedule. Check notification permission and saved lists.');
         return;
       }
-      if (confirmed === 0) {
-        alert(
-          `Scheduled ${scheduled} messages from Chad\n\nNote: getAllScheduledNotificationsAsync returned an empty array after scheduling.`,
-        );
-        return;
-      }
-      alert(`Scheduled ${scheduled} messages from Chad`);
+      alert(`${confirmed} daily notifications successfully scheduled`);
     } catch {
       alert('Could not schedule. Check notification permission and saved lists.');
     }
