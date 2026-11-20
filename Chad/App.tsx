@@ -10,6 +10,7 @@ import {
   ScrollView,
   ImageBackground,
 } from 'react-native';
+import { LinearGradient } from 'expo-linear-gradient';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as Notifications from 'expo-notifications';
 import {
@@ -330,7 +331,11 @@ export default function App() {
       style={styles.homeScreen}
       resizeMode="cover"
     >
-      <View style={styles.homeOverlay}>
+      <LinearGradient
+        colors={['rgba(0,0,0,0.28)', 'rgba(0,0,0,0.32)', 'rgba(0,0,0,0.42)']}
+        locations={[0, 0.55, 1]}
+        style={styles.homeOverlay}
+      >
         <ScrollView
           contentContainerStyle={styles.homeContent}
           keyboardShouldPersistTaps="handled"
@@ -394,7 +399,7 @@ export default function App() {
             ))
           )}
         </ScrollView>
-      </View>
+      </LinearGradient>
     </ImageBackground>
   );
 }
@@ -408,7 +413,6 @@ const styles = StyleSheet.create({
   homeScreen: { flex: 1, backgroundColor: '#0a0a0a' },
   homeOverlay: {
     flex: 1,
-    backgroundColor: 'rgba(0,0,0,0.45)',
   },
   homeContent: { flexGrow: 1, padding: 20, paddingTop: 64, paddingBottom: 48 },
   homeTitle: {
