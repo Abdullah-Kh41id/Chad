@@ -47,7 +47,17 @@ Notifications.setNotificationHandler({
   }),
 });
 
-type Step = 'anti' | 'vision' | 'home' | 'editAnti' | 'editVision';
+type Step =
+  | 'anti'
+  | 'vision'
+  | 'home'
+  | 'viewVision'
+  | 'viewAnti'
+  | 'messages'
+  | 'schedule'
+  | 'editAnti'
+  | 'editVision';
+
 type EditTarget = 'antiVision' | 'vision';
 
 export default function App() {
@@ -66,8 +76,10 @@ export default function App() {
   }, []);
 
   useEffect(() => {
+    if (step === 'messages' || step === 'home') {
+      refreshChadMessages();
+    }
     if (step !== 'home') return;
-    refreshChadMessages();
     if (antiList.length === 0 && visionList.length === 0) return;
     if (didAutoSchedule.current) return;
     didAutoSchedule.current = true;
@@ -127,12 +139,19 @@ export default function App() {
 
     if (storageKey === 'antiVision') {
       setAntiList(cleaned);
-    } else {
-      setVisionList(cleaned);
+      setEditNewItem('');
+      setStep('viewAnti');
+      return;
     }
 
+    setVisionList(cleaned);
     setEditNewItem('');
-    setStep('home');
+    setStep('viewVision');
+  };
+
+  const cancelEdit = () => {
+    setEditNewItem('');
+    setStep(step === 'editAnti' ? 'viewAnti' : 'viewVision');
   };
 
   const sendRealTest = async () => {
@@ -215,6 +234,38 @@ export default function App() {
       alert('Could not generate preview messages.');
     }
   };
+
+  const renderCinematicShell = (content: React.ReactNode, options?: { bottomNav?: boolean }) => (
+    <ImageBackground
+      source={require('./assets/home-cinematic-bg.jpg')}
+      style={styles.homeScreen}
+      resizeMode="cover"
+    >
+      <LinearGradient
+        colors={['rgba(0,0,0,0.28)', 'rgba(0,0,0,0.32)', 'rgba(0,0,0,0.42)']}
+        locations={[0, 0.55, 1]}
+        style={styles.homeOverlay}
+      >
+        {options?.bottomNav ? (
+          <View style={styles.homeShell}>{content}</View>
+        ) : (
+          <ScrollView
+            contentContainerStyle={styles.panelContent}
+            keyboardShouldPersistTaps="handled"
+            showsVerticalScrollIndicator={false}
+          >
+            {content}
+          </ScrollView>
+        )}
+      </LinearGradient>
+    </ImageBackground>
+  );
+
+  const backButton = (
+    <Pressable style={[styles.gameButton, styles.backButton]} onPress={() => setStep('home')}>
+      <Text style={styles.gameButtonText}>BACK</Text>
+    </Pressable>
+  );
 
   if (step === 'anti') {
     return (
@@ -317,7 +368,7 @@ export default function App() {
         />
         <Button title="Add" onPress={addDraftItem} />
         <View style={styles.editActions}>
-          <Button title="Cancel" onPress={() => setStep('home')} />
+          <Button title="Cancel" onPress={cancelEdit} />
           <View style={{ height: 8 }} />
           <Button title="Save" onPress={saveEdit} />
         </View>
@@ -325,82 +376,119 @@ export default function App() {
     );
   }
 
-  return (
-    <ImageBackground
-      source={require('./assets/home-cinematic-bg.jpg')}
-      style={styles.homeScreen}
-      resizeMode="cover"
-    >
-      <LinearGradient
-        colors={['rgba(0,0,0,0.28)', 'rgba(0,0,0,0.32)', 'rgba(0,0,0,0.42)']}
-        locations={[0, 0.55, 1]}
-        style={styles.homeOverlay}
-      >
-        <ScrollView
-          contentContainerStyle={styles.homeContent}
-          keyboardShouldPersistTaps="handled"
-          showsVerticalScrollIndicator={false}
-        >
-          <Text style={styles.homeTitle}>CHAD</Text>
-          <Text style={styles.homeSub}>The man you’re becoming</Text>
-
-          <Pressable style={styles.gameButton} onPress={sendRealTest}>
-            <Text style={styles.gameButtonText}>SEND TEST MESSAGE FROM CHAD</Text>
+  if (step === 'viewVision') {
+    return renderCinematicShell(
+      <>
+        {backButton}
+        <View style={styles.sectionHeader}>
+          <Text style={styles.sectionTitle}>VISION</Text>
+          <Pressable onPress={() => openEdit('vision')} hitSlop={8}>
+            <Text style={styles.editLink}>EDIT</Text>
           </Pressable>
-          <Pressable style={styles.gameButton} onPress={onScheduleNext24Hours}>
-            <Text style={styles.gameButtonText}>SCHEDULE NEXT 24 HOURS</Text>
-          </Pressable>
-          <Pressable style={styles.gameButton} onPress={onTestScheduleSoon}>
-            <Text style={styles.gameButtonText}>TEST SCHEDULE IN 30 SECONDS</Text>
-          </Pressable>
-          <Pressable style={[styles.gameButton, styles.gameButtonLast]} onPress={onGeneratePreview}>
-            <Text style={styles.gameButtonText}>GENERATE & PREVIEW MESSAGES</Text>
-          </Pressable>
-
-          <View style={styles.sectionHeader}>
-            <Text style={styles.sectionTitle}>ANTI-VISION</Text>
-            <Pressable onPress={() => openEdit('antiVision')} hitSlop={8}>
-              <Text style={styles.editLink}>EDIT</Text>
-            </Pressable>
-          </View>
-          {antiList.map((item, i) => (
-            <View key={`anti-${i}`} style={styles.card}>
-              <Text style={styles.cardBullet}>•</Text>
-              <Text style={styles.cardText}>{item}</Text>
-            </View>
-          ))}
-
-          <View style={styles.sectionHeader}>
-            <Text style={styles.sectionTitle}>VISION</Text>
-            <Pressable onPress={() => openEdit('vision')} hitSlop={8}>
-              <Text style={styles.editLink}>EDIT</Text>
-            </Pressable>
-          </View>
-          {visionList.map((item, i) => (
+        </View>
+        {visionList.length === 0 ? (
+          <Text style={styles.chatEmpty}>No vision items yet.</Text>
+        ) : (
+          visionList.map((item, i) => (
             <View key={`vision-${i}`} style={styles.card}>
               <Text style={styles.cardBullet}>•</Text>
               <Text style={styles.cardText}>{item}</Text>
             </View>
-          ))}
+          ))
+        )}
+      </>,
+    );
+  }
 
-          <View style={styles.sectionHeader}>
-            <Text style={styles.sectionTitle}>CHAD MESSAGES</Text>
-          </View>
-          {chadMessages.length === 0 ? (
-            <Text style={styles.chatEmpty}>No messages yet. Send a test or schedule the next 24 hours.</Text>
-          ) : (
-            chadMessages.map((message) => (
-              <View key={`${message.timestamp}-${message.text}`} style={styles.chatRow}>
-                <View style={styles.chatBubble}>
-                  <Text style={styles.chatBubbleText}>{message.text}</Text>
-                  <Text style={styles.chatTime}>{formatMessageTime(message.timestamp)}</Text>
-                </View>
+  if (step === 'viewAnti') {
+    return renderCinematicShell(
+      <>
+        {backButton}
+        <View style={styles.sectionHeader}>
+          <Text style={styles.sectionTitle}>ANTI-VISION</Text>
+          <Pressable onPress={() => openEdit('antiVision')} hitSlop={8}>
+            <Text style={styles.editLink}>EDIT</Text>
+          </Pressable>
+        </View>
+        {antiList.length === 0 ? (
+          <Text style={styles.chatEmpty}>No anti-vision items yet.</Text>
+        ) : (
+          antiList.map((item, i) => (
+            <View key={`anti-${i}`} style={styles.card}>
+              <Text style={styles.cardBullet}>•</Text>
+              <Text style={styles.cardText}>{item}</Text>
+            </View>
+          ))
+        )}
+      </>,
+    );
+  }
+
+  if (step === 'messages') {
+    return renderCinematicShell(
+      <>
+        {backButton}
+        <View style={styles.sectionHeader}>
+          <Text style={styles.sectionTitle}>MESSAGES</Text>
+        </View>
+        {chadMessages.length === 0 ? (
+          <Text style={styles.chatEmpty}>No messages yet. Schedule or preview from Schedule.</Text>
+        ) : (
+          chadMessages.map((message) => (
+            <View key={`${message.timestamp}-${message.text}`} style={styles.chatRow}>
+              <View style={styles.chatBubble}>
+                <Text style={styles.chatBubbleText}>{message.text}</Text>
+                <Text style={styles.chatTime}>{formatMessageTime(message.timestamp)}</Text>
               </View>
-            ))
-          )}
-        </ScrollView>
-      </LinearGradient>
-    </ImageBackground>
+            </View>
+          ))
+        )}
+      </>,
+    );
+  }
+
+  if (step === 'schedule') {
+    return renderCinematicShell(
+      <>
+        {backButton}
+        <View style={styles.sectionHeader}>
+          <Text style={styles.sectionTitle}>SCHEDULE</Text>
+        </View>
+        <Pressable style={styles.gameButton} onPress={onScheduleNext24Hours}>
+          <Text style={styles.gameButtonText}>SCHEDULE NEXT 24 HOURS</Text>
+        </Pressable>
+        <Pressable style={styles.gameButton} onPress={onTestScheduleSoon}>
+          <Text style={styles.gameButtonText}>TEST SCHEDULE IN 30 SECONDS</Text>
+        </Pressable>
+        <Pressable style={styles.gameButton} onPress={sendRealTest}>
+          <Text style={styles.gameButtonText}>SEND TEST MESSAGE FROM CHAD</Text>
+        </Pressable>
+        <Pressable style={[styles.gameButton, styles.gameButtonLast]} onPress={onGeneratePreview}>
+          <Text style={styles.gameButtonText}>GENERATE & PREVIEW MESSAGES</Text>
+        </Pressable>
+      </>,
+    );
+  }
+
+  return renderCinematicShell(
+    <View style={styles.homeNav}>
+      <Pressable style={styles.gameButton} onPress={() => setStep('viewVision')}>
+        <Text style={styles.gameButtonText}>VISION</Text>
+      </Pressable>
+      <Pressable style={styles.gameButton} onPress={() => setStep('viewAnti')}>
+        <Text style={styles.gameButtonText}>ANTI-VISION</Text>
+      </Pressable>
+      <Pressable style={styles.gameButton} onPress={() => setStep('messages')}>
+        <Text style={styles.gameButtonText}>MESSAGES</Text>
+      </Pressable>
+      <Pressable
+        style={[styles.gameButton, styles.gameButtonLast]}
+        onPress={() => setStep('schedule')}
+      >
+        <Text style={styles.gameButtonText}>SCHEDULE</Text>
+      </Pressable>
+    </View>,
+    { bottomNav: true },
   );
 }
 
@@ -414,23 +502,25 @@ const styles = StyleSheet.create({
   homeOverlay: {
     flex: 1,
   },
-  homeContent: { flexGrow: 1, padding: 20, paddingTop: 64, paddingBottom: 48 },
-  homeTitle: {
-    fontSize: 42,
-    fontWeight: '800',
-    marginBottom: 4,
-    color: '#ffffff',
-    letterSpacing: 4,
-    textShadowColor: 'rgba(0,0,0,0.6)',
-    textShadowOffset: { width: 0, height: 2 },
-    textShadowRadius: 8,
+  homeShell: {
+    flex: 1,
+    justifyContent: 'flex-end',
+    paddingHorizontal: 20,
+    paddingBottom: 44,
   },
-  homeSub: {
-    fontSize: 14,
-    marginBottom: 28,
-    color: 'rgba(255,255,255,0.72)',
-    letterSpacing: 1.2,
-    textTransform: 'uppercase',
+  homeNav: {
+    width: '100%',
+  },
+  panelContent: {
+    flexGrow: 1,
+    paddingHorizontal: 20,
+    paddingTop: 56,
+    paddingBottom: 40,
+  },
+  backButton: {
+    alignSelf: 'flex-start',
+    minWidth: 96,
+    marginBottom: 18,
   },
   gameButton: {
     height: 46,
@@ -443,7 +533,7 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     marginBottom: 10,
   },
-  gameButtonLast: { marginBottom: 8 },
+  gameButtonLast: { marginBottom: 0 },
   gameButtonText: {
     color: '#ffffff',
     fontSize: 12,
@@ -452,7 +542,7 @@ const styles = StyleSheet.create({
     textTransform: 'uppercase',
   },
   sectionHeader: {
-    marginTop: 28,
+    marginTop: 8,
     marginBottom: 12,
     flexDirection: 'row',
     alignItems: 'center',
