@@ -1,8 +1,9 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { View, Text, TextInput, Button, FlatList, StyleSheet } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as Notifications from 'expo-notifications';
 import { generateTestMessage } from './lib/messageGenerator';
+import { scheduleDailyChadMessages } from './lib/scheduleDailyChadMessages';
 
 Notifications.setNotificationHandler({
   handleNotification: async () => ({
@@ -19,10 +20,19 @@ export default function App() {
   const [visionInput, setVisionInput] = useState('');
   const [antiList, setAntiList] = useState<string[]>([]);
   const [visionList, setVisionList] = useState<string[]>([]);
+  const didAutoSchedule = useRef(false);
 
   useEffect(() => {
     loadData();
   }, []);
+
+  useEffect(() => {
+    if (step !== 'home') return;
+    if (antiList.length === 0 && visionList.length === 0) return;
+    if (didAutoSchedule.current) return;
+    didAutoSchedule.current = true;
+    scheduleDailyChadMessages();
+  }, [step, antiList.length, visionList.length]);
 
   const loadData = async () => {
     const anti = await AsyncStorage.getItem('antiVision');
@@ -63,6 +73,15 @@ export default function App() {
       },
       trigger: null,
     });
+  };
+
+  const onScheduleDaily = async () => {
+    const ok = await scheduleDailyChadMessages();
+    if (!ok) {
+      alert('Could not schedule. Check notification permission and saved lists.');
+      return;
+    }
+    alert('Daily Chad messages scheduled');
   };
 
   if (step === 'anti') {
@@ -142,6 +161,8 @@ export default function App() {
       <Text style={styles.title}>Chad is ready</Text>
       <Text style={styles.sub}>Your lists are saved.</Text>
       <Button title="SEND TEST MESSAGE FROM CHAD" onPress={sendRealTest} />
+      <View style={{ height: 12 }} />
+      <Button title="Schedule Daily Messages" onPress={onScheduleDaily} />
       <Text style={{ marginTop: 30, fontWeight: 'bold' }}>Anti-Vision:</Text>
       {antiList.map((item, i) => (
         <Text key={i}>• {item}</Text>
