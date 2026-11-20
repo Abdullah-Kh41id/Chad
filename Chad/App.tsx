@@ -132,9 +132,9 @@ export default function App() {
         alert('Could not schedule. Check notification permission and saved lists.');
         return;
       }
-      alert(`Scheduled ${count} Chad notifications`);
-    } catch (error) {
-      alert(`Failed to schedule notifications: ${String(error)}`);
+      alert(`Scheduled ${count} messages from Chad`);
+    } catch {
+      alert('Could not schedule. Check notification permission and saved lists.');
     }
   };
 
