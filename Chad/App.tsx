@@ -90,7 +90,6 @@ export default function App() {
   });
   const [totalXp, setTotalXp] = useState(0);
   const didAutoSchedule = useRef(false);
-  const pagerRef = useRef<ScrollView>(null);
 
   useEffect(() => {
     loadData();
@@ -638,7 +637,6 @@ export default function App() {
         style={styles.homeOverlay}
       >
         <ScrollView
-          ref={pagerRef}
           horizontal
           pagingEnabled
           showsHorizontalScrollIndicator={false}
