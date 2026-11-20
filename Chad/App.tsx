@@ -126,12 +126,16 @@ export default function App() {
   };
 
   const onScheduleDaily = async () => {
-    const ok = await scheduleDailyChadMessages();
-    if (!ok) {
-      alert('Could not schedule. Check notification permission and saved lists.');
-      return;
+    try {
+      const count = await scheduleDailyChadMessages();
+      if (!count) {
+        alert('Could not schedule. Check notification permission and saved lists.');
+        return;
+      }
+      alert(`Scheduled ${count} Chad notifications`);
+    } catch (error) {
+      alert(`Failed to schedule notifications: ${String(error)}`);
     }
-    alert('Daily Chad messages scheduled');
   };
 
   if (step === 'anti') {
