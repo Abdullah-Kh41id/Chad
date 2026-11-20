@@ -340,38 +340,57 @@ export default function App() {
   }
 
   if (step === 'editAnti' || step === 'editVision') {
-    const title = step === 'editAnti' ? 'Edit Anti-Vision' : 'Edit Vision';
+    const title = step === 'editAnti' ? 'EDIT ANTI-VISION' : 'EDIT VISION';
     return (
-      <View style={styles.container}>
-        <Text style={styles.title}>{title}</Text>
-        <Text style={styles.sub}>Add, edit, or remove items, then Save.</Text>
-        <ScrollView style={styles.editList} keyboardShouldPersistTaps="handled">
-          {editDraft.map((item, index) => (
-            <View key={index} style={styles.editRow}>
-              <TextInput
-                style={[styles.input, styles.editInput]}
-                value={item}
-                onChangeText={(value) => updateDraftItem(index, value)}
-              />
-              <Pressable style={styles.removeButton} onPress={() => removeDraftItem(index)}>
-                <Text style={styles.removeText}>Remove</Text>
-              </Pressable>
-            </View>
-          ))}
+      <View style={styles.editScreen}>
+        <ScrollView
+          contentContainerStyle={styles.editScreenContent}
+          keyboardShouldPersistTaps="handled"
+          showsVerticalScrollIndicator={false}
+        >
+          <Text style={styles.editTitle}>{title}</Text>
+          <Text style={styles.editSub}>Add, edit, or remove items, then Save.</Text>
+
+          <View style={styles.editList}>
+            {editDraft.map((item, index) => (
+              <View key={index} style={styles.editRow}>
+                <TextInput
+                  style={[styles.editField, styles.editInput]}
+                  value={item}
+                  onChangeText={(value) => updateDraftItem(index, value)}
+                  placeholderTextColor="rgba(255,255,255,0.35)"
+                  selectionColor="#ffffff"
+                />
+                <Pressable style={styles.removeButton} onPress={() => removeDraftItem(index)}>
+                  <Text style={styles.removeText}>REMOVE</Text>
+                </Pressable>
+              </View>
+            ))}
+          </View>
+
+          <TextInput
+            style={styles.editField}
+            placeholder="Add a new item"
+            placeholderTextColor="rgba(255,255,255,0.35)"
+            value={editNewItem}
+            onChangeText={setEditNewItem}
+            onSubmitEditing={addDraftItem}
+            selectionColor="#ffffff"
+          />
+
+          <Pressable style={styles.gameButton} onPress={addDraftItem}>
+            <Text style={styles.gameButtonText}>ADD</Text>
+          </Pressable>
+
+          <View style={styles.editActions}>
+            <Pressable style={styles.gameButton} onPress={cancelEdit}>
+              <Text style={styles.gameButtonText}>CANCEL</Text>
+            </Pressable>
+            <Pressable style={[styles.gameButton, styles.gameButtonLast]} onPress={saveEdit}>
+              <Text style={styles.gameButtonText}>SAVE</Text>
+            </Pressable>
+          </View>
         </ScrollView>
-        <TextInput
-          style={styles.input}
-          placeholder="Add a new item"
-          value={editNewItem}
-          onChangeText={setEditNewItem}
-          onSubmitEditing={addDraftItem}
-        />
-        <Button title="Add" onPress={addDraftItem} />
-        <View style={styles.editActions}>
-          <Button title="Cancel" onPress={cancelEdit} />
-          <View style={{ height: 8 }} />
-          <Button title="Save" onPress={saveEdit} />
-        </View>
       </View>
     );
   }
@@ -587,10 +606,63 @@ const styles = StyleSheet.create({
   },
   chatBubbleText: { color: '#ffffff', fontSize: 14, lineHeight: 20 },
   chatTime: { color: 'rgba(255,255,255,0.45)', fontSize: 11, marginTop: 6 },
-  editList: { flexGrow: 0, maxHeight: 360, marginBottom: 12 },
-  editRow: { flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 4 },
-  editInput: { flex: 1, marginBottom: 0 },
-  removeButton: { paddingHorizontal: 8, paddingVertical: 10 },
-  removeText: { color: '#c62828', fontWeight: '600' },
-  editActions: { marginTop: 16 },
+  editScreen: {
+    flex: 1,
+    backgroundColor: '#0a0a0a',
+  },
+  editScreenContent: {
+    flexGrow: 1,
+    paddingHorizontal: 20,
+    paddingTop: 56,
+    paddingBottom: 40,
+  },
+  editTitle: {
+    fontSize: 18,
+    fontWeight: '700',
+    color: '#ffffff',
+    letterSpacing: 2,
+    marginBottom: 8,
+  },
+  editSub: {
+    fontSize: 14,
+    color: 'rgba(255,255,255,0.6)',
+    marginBottom: 20,
+  },
+  editList: { marginBottom: 16 },
+  editRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 10,
+  },
+  editField: {
+    backgroundColor: 'rgba(255,255,255,0.06)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.22)',
+    borderRadius: 8,
+    paddingHorizontal: 12,
+    paddingVertical: 12,
+    marginBottom: 10,
+    color: '#ffffff',
+    fontSize: 15,
+  },
+  editInput: {
+    flex: 1,
+    marginBottom: 0,
+    marginRight: 10,
+  },
+  removeButton: {
+    paddingHorizontal: 10,
+    paddingVertical: 8,
+    borderRadius: 6,
+    borderWidth: 1,
+    borderColor: 'rgba(198,40,40,0.55)',
+    backgroundColor: 'rgba(198,40,40,0.08)',
+  },
+  removeText: {
+    color: '#ff6b6b',
+    fontSize: 10,
+    fontWeight: '700',
+    letterSpacing: 1.2,
+  },
+  editActions: { marginTop: 8 },
 });
