@@ -1,3 +1,12 @@
+export type ChadMessageKind = 'affirmation' | 'accountability' | 'sideQuest';
+
+export type MessageContext = {
+  vision: string[];
+  antiVision: string[];
+  dailyMissions?: string[];
+  quarterlyMissions?: string[];
+};
+
 function pick<T>(items: T[]): T | undefined {
   if (items.length === 0) return undefined;
   return items[Math.floor(Math.random() * items.length)];
@@ -54,10 +63,22 @@ function asAntiBehavior(bad: string): string {
   return b;
 }
 
-export type ChadMessageKind = 'affirmation' | 'accountability' | 'sideQuest';
+/** Priority: daily missions → vision → quarterly missions. */
+function pickPriorityGoal(ctx: MessageContext): string | undefined {
+  const daily = shuffle(ctx.dailyMissions ?? []);
+  if (daily.length > 0) return pick(daily);
 
-export function generateAffirmation(vision: string[], _antiVision: string[]): string {
-  const goal = pick(shuffle(vision));
+  const vision = shuffle(ctx.vision);
+  if (vision.length > 0) return pick(vision);
+
+  const quarterly = shuffle(ctx.quarterlyMissions ?? []);
+  if (quarterly.length > 0) return pick(quarterly);
+
+  return undefined;
+}
+
+export function generateAffirmation(ctx: MessageContext): string {
+  const goal = pickPriorityGoal(ctx) ?? pick(shuffle(ctx.vision));
   if (!goal) {
     return 'You will become the man you wrote down.';
   }
@@ -73,9 +94,12 @@ export function generateAffirmation(vision: string[], _antiVision: string[]): st
   return trimMessage(pick(templates)!());
 }
 
-export function generateAccountability(vision: string[], antiVision: string[]): string {
-  const goal = pick(shuffle(vision));
-  const bad = pick(shuffle(antiVision));
+export function generateAccountability(ctx: MessageContext): string {
+  const bad = pick(shuffle(ctx.antiVision));
+  const goal =
+    pick(shuffle(ctx.vision)) ??
+    pick(shuffle(ctx.dailyMissions ?? [])) ??
+    pick(shuffle(ctx.quarterlyMissions ?? []));
 
   if (goal && bad) {
     const outcome = asVisionOutcome(goal);
@@ -85,6 +109,7 @@ export function generateAccountability(vision: string[], antiVision: string[]): 
       () => `You won’t get that ${lower(goal)} by ${behavior}.`,
       () => `${behavior} doesn’t build ${lower(goal)}.`,
       () => `Cut the ${behavior}. You want ${lower(goal)}.`,
+      () => `You won’t finish ${lower(goal)} by ${behavior}.`,
     ];
     return trimMessage(pick(templates)!());
   }
@@ -100,70 +125,93 @@ export function generateAccountability(vision: string[], antiVision: string[]): 
   return 'Hold the line. Excuses don’t build the life you want.';
 }
 
-type SideQuestTemplate = (goal?: string, bad?: string) => string;
-
-const UNIVERSAL_SIDE_QUESTS: SideQuestTemplate[] = [
+const UNIVERSAL_SIDE_QUESTS = [
   () => 'Side quest: Drink a full glass of water right now.',
   () => 'Side quest: Stand up and stretch for 60 seconds.',
   () => 'Side quest: Put your phone face-down for 10 minutes.',
   () => 'Side quest: Make your bed before you do anything else.',
-  () => 'Side quest: Write one sentence about who you’re becoming.',
-  () => 'Side quest: Do 20 pushups or walk around the block.',
 ];
 
-function listAwareSideQuests(goal?: string, bad?: string): SideQuestTemplate[] {
-  const quests: SideQuestTemplate[] = [];
+export function generateSideQuest(ctx: MessageContext): string {
+  const daily = shuffle(ctx.dailyMissions ?? []);
+  const quarterly = shuffle(ctx.quarterlyMissions ?? []);
+  const vision = shuffle(ctx.vision);
+  const bad = pick(shuffle(ctx.antiVision));
 
-  if (goal) {
-    const g = lower(goal);
-    quests.push(
-      () => `Side quest: Take one tiny step toward ${g} in the next 10 minutes.`,
-      () => `Side quest: Text or note one action that moves ${g} forward.`,
-      () => `Side quest: Clear 5 minutes and work on ${g} only.`,
-      () => `Side quest: Ask: what’s the next smallest move for ${g}?`,
+  const pool: Array<() => string> = [];
+
+  // 1) Daily missions — highest priority for side quests
+  for (const mission of daily.slice(0, 4)) {
+    const m = lower(mission);
+    pool.push(
+      () => `Side quest: ${clean(mission)}.`,
+      () => `Side quest: Next move toward ${m}.`,
+      () => `Next move toward ${m}.`,
     );
   }
 
+  // 2) Vision items
+  for (const goal of vision.slice(0, 3)) {
+    const g = lower(goal);
+    pool.push(
+      () => `Side quest: Next move toward ${g}.`,
+      () => `Side quest: Take one tiny step toward ${g}.`,
+    );
+  }
+
+  // 3) Quarterly missions
+  for (const mission of quarterly.slice(0, 2)) {
+    const m = lower(mission);
+    pool.push(() => `Side quest: Next move toward ${m}.`);
+  }
+
+  // Light anti-vision contrast, then universals as fallback
   if (bad) {
     const b = asAntiBehavior(bad);
-    quests.push(
-      () => `Side quest: Catch yourself mid-${b} and stop for 15 minutes.`,
-      () => `Side quest: Replace ${b} with one focused minute of work.`,
-      () => `Side quest: Block the trigger for ${b} for the next hour.`,
-    );
+    pool.push(() => `Side quest: Replace ${b} with one focused minute of work.`);
   }
 
-  return quests;
+  if (pool.length === 0) {
+    return trimMessage(pick(UNIVERSAL_SIDE_QUESTS)!());
+  }
+
+  // Prefer mission/vision phrasing; keep a little universal variety.
+  const weighted = [...pool, ...shuffle(UNIVERSAL_SIDE_QUESTS).slice(0, 1)];
+  return trimMessage(pick(weighted)!());
 }
 
-export function generateSideQuest(vision: string[], antiVision: string[]): string {
-  const goal = pick(shuffle(vision));
-  const bad = pick(shuffle(antiVision));
-
-  // Prefer list-aware templates when available, but keep universal variety.
-  const pool =
-    goal || bad
-      ? [...listAwareSideQuests(goal, bad), ...shuffle(UNIVERSAL_SIDE_QUESTS).slice(0, 3)]
-      : UNIVERSAL_SIDE_QUESTS;
-
-  return trimMessage(pick(pool)!());
-}
-
-export function generateTestMessage(vision: string[], antiVision: string[]): string {
-  return generateAffirmation(vision, antiVision);
+export function generateTestMessage(
+  vision: string[],
+  antiVision: string[],
+  extras?: Pick<MessageContext, 'dailyMissions' | 'quarterlyMissions'>,
+): string {
+  return generateAffirmation({
+    vision,
+    antiVision,
+    dailyMissions: extras?.dailyMissions,
+    quarterlyMissions: extras?.quarterlyMissions,
+  });
 }
 
 export function generateMessageByKind(
   kind: ChadMessageKind,
   vision: string[],
   antiVision: string[],
+  extras?: Pick<MessageContext, 'dailyMissions' | 'quarterlyMissions'>,
 ): string {
+  const ctx: MessageContext = {
+    vision,
+    antiVision,
+    dailyMissions: extras?.dailyMissions,
+    quarterlyMissions: extras?.quarterlyMissions,
+  };
+
   switch (kind) {
     case 'affirmation':
-      return generateAffirmation(vision, antiVision);
+      return generateAffirmation(ctx);
     case 'accountability':
-      return generateAccountability(vision, antiVision);
+      return generateAccountability(ctx);
     case 'sideQuest':
-      return generateSideQuest(vision, antiVision);
+      return generateSideQuest(ctx);
   }
 }

@@ -211,6 +211,11 @@ export default function App() {
     alert(`+${reward} XP`);
   };
 
+  const missionExtras = () => ({
+    dailyMissions: missionBoard.daily.filter((m) => !m.completed).map((m) => m.text),
+    quarterlyMissions: missionBoard.quarterly.filter((m) => !m.completed).map((m) => m.text),
+  });
+
   const sendRealTest = async () => {
     const { status } = await Notifications.requestPermissionsAsync();
     if (status !== 'granted') {
@@ -222,7 +227,7 @@ export default function App() {
     const antiRaw = await AsyncStorage.getItem('antiVision');
     const vision: string[] = visionRaw ? JSON.parse(visionRaw) : [];
     const antiVision: string[] = antiRaw ? JSON.parse(antiRaw) : [];
-    const message = generateTestMessage(vision, antiVision);
+    const message = generateTestMessage(vision, antiVision, missionExtras());
 
     await Notifications.scheduleNotificationAsync({
       content: {
@@ -280,7 +285,7 @@ export default function App() {
       }
 
       const bodies = PREVIEW_KINDS.map((kind) =>
-        generateMessageByKind(kind, vision, antiVision),
+        generateMessageByKind(kind, vision, antiVision, missionExtras()),
       );
       const updated = await saveChadMessages(bodies);
       setChadMessages(updated.slice(0, 10));
@@ -402,25 +407,23 @@ export default function App() {
   );
 
   const renderSchedulePage = () => (
-    <ScrollView
-      style={styles.page}
-      contentContainerStyle={styles.pageScrollContent}
-      showsVerticalScrollIndicator={false}
-    >
-      <Text style={styles.pageTitle}>SCHEDULE</Text>
-      <Pressable style={styles.gameButton} onPress={onScheduleNext24Hours}>
-        <Text style={styles.gameButtonText}>SCHEDULE NEXT 24 HOURS</Text>
-      </Pressable>
-      <Pressable style={styles.gameButton} onPress={onTestScheduleSoon}>
-        <Text style={styles.gameButtonText}>TEST SCHEDULE IN 30 SECONDS</Text>
-      </Pressable>
-      <Pressable style={styles.gameButton} onPress={sendRealTest}>
-        <Text style={styles.gameButtonText}>SEND TEST MESSAGE FROM CHAD</Text>
-      </Pressable>
-      <Pressable style={[styles.gameButton, styles.gameButtonLast]} onPress={onGeneratePreview}>
-        <Text style={styles.gameButtonText}>GENERATE & PREVIEW MESSAGES</Text>
-      </Pressable>
-    </ScrollView>
+    <View style={[styles.page, styles.schedulePage]}>
+      <Text style={[styles.pageTitle, styles.scheduleTitle]}>SCHEDULE</Text>
+      <View style={styles.scheduleMenu}>
+        <Pressable style={styles.gameButton} onPress={onScheduleNext24Hours}>
+          <Text style={styles.gameButtonText}>SCHEDULE NEXT 24 HOURS</Text>
+        </Pressable>
+        <Pressable style={styles.gameButton} onPress={onTestScheduleSoon}>
+          <Text style={styles.gameButtonText}>TEST SCHEDULE IN 30 SECONDS</Text>
+        </Pressable>
+        <Pressable style={styles.gameButton} onPress={sendRealTest}>
+          <Text style={styles.gameButtonText}>SEND TEST MESSAGE FROM CHAD</Text>
+        </Pressable>
+        <Pressable style={[styles.gameButton, styles.gameButtonLast]} onPress={onGeneratePreview}>
+          <Text style={styles.gameButtonText}>GENERATE & PREVIEW MESSAGES</Text>
+        </Pressable>
+      </View>
+    </View>
   );
 
   const renderHomePage = () => (
@@ -689,6 +692,19 @@ const styles = StyleSheet.create({
     paddingHorizontal: 20,
     paddingTop: 56,
     paddingBottom: 40,
+  },
+  schedulePage: {
+    paddingHorizontal: 20,
+    paddingTop: 56,
+    paddingBottom: 28,
+    justifyContent: 'space-between',
+  },
+  scheduleTitle: {
+    marginBottom: 0,
+  },
+  scheduleMenu: {
+    width: '100%',
+    paddingBottom: 12,
   },
   panelContent: {
     flexGrow: 1,

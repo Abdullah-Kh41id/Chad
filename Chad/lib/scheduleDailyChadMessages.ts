@@ -2,6 +2,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as Notifications from 'expo-notifications';
 import { saveChadMessages } from './chadMessages';
 import { ChadMessageKind, generateMessageByKind } from './messageGenerator';
+import { loadMissionBoard } from './missions';
 
 const NEXT_24H_SLOTS: { seconds: number; kind: ChadMessageKind }[] = [
   { seconds: 2 * 60, kind: 'affirmation' },
@@ -58,6 +59,10 @@ async function scheduleOffsetMessages(
     return { scheduled: 0, confirmed: 0, exampleMessage: '' };
   }
 
+  const board = await loadMissionBoard();
+  const dailyMissions = board.daily.filter((m) => !m.completed).map((m) => m.text);
+  const quarterlyMissions = board.quarterly.filter((m) => !m.completed).map((m) => m.text);
+
   const { vision, antiVision } = lists;
   await Notifications.cancelAllScheduledNotificationsAsync();
 
@@ -65,7 +70,10 @@ async function scheduleOffsetMessages(
   const bodies: string[] = [];
   const fireTimes: number[] = [];
   for (const slot of slots) {
-    const body = generateMessageByKind(slot.kind, vision, antiVision);
+    const body = generateMessageByKind(slot.kind, vision, antiVision, {
+      dailyMissions,
+      quarterlyMissions,
+    });
     bodies.push(body);
     fireTimes.push(now + slot.seconds * 1000);
 
