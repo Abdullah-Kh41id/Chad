@@ -9,6 +9,9 @@ import {
   Pressable,
   ScrollView,
   ImageBackground,
+  Dimensions,
+  NativeSyntheticEvent,
+  NativeScrollEvent,
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import AsyncStorage from '@react-native-async-storage/async-storage';
@@ -29,6 +32,18 @@ import {
   scheduleNext24Hours,
   scheduleSoonTestNotifications,
 } from './lib/scheduleDailyChadMessages';
+import {
+  CATEGORY_LABELS,
+  Mission,
+  MissionBoard,
+  MissionCategory,
+  XP_REWARDS,
+  createMission,
+  loadMissionBoard,
+  loadTotalXp,
+  saveMissionBoard,
+  saveTotalXp,
+} from './lib/missions';
 
 const PREVIEW_KINDS: ChadMessageKind[] = [
   'affirmation',
@@ -37,6 +52,9 @@ const PREVIEW_KINDS: ChadMessageKind[] = [
   'affirmation',
   'accountability',
 ];
+
+const PAGE_WIDTH = Dimensions.get('window').width;
+const PAGES = ['home', 'goals', 'messages', 'schedule'] as const;
 
 Notifications.setNotificationHandler({
   handleNotification: async () => ({
@@ -47,21 +65,12 @@ Notifications.setNotificationHandler({
   }),
 });
 
-type Step =
-  | 'anti'
-  | 'vision'
-  | 'home'
-  | 'viewVision'
-  | 'viewAnti'
-  | 'messages'
-  | 'schedule'
-  | 'editAnti'
-  | 'editVision';
-
+type Step = 'anti' | 'vision' | 'main' | 'editAnti' | 'editVision' | 'viewVision' | 'viewAnti';
 type EditTarget = 'antiVision' | 'vision';
 
 export default function App() {
   const [step, setStep] = useState<Step>('anti');
+  const [pageIndex, setPageIndex] = useState(0);
   const [antiInput, setAntiInput] = useState('');
   const [visionInput, setVisionInput] = useState('');
   const [antiList, setAntiList] = useState<string[]>([]);
@@ -69,17 +78,27 @@ export default function App() {
   const [editDraft, setEditDraft] = useState<string[]>([]);
   const [editNewItem, setEditNewItem] = useState('');
   const [chadMessages, setChadMessages] = useState<ChadMessage[]>([]);
+  const [missionBoard, setMissionBoard] = useState<MissionBoard>({
+    daily: [],
+    quarterly: [],
+    year: [],
+  });
+  const [missionDrafts, setMissionDrafts] = useState<Record<MissionCategory, string>>({
+    daily: '',
+    quarterly: '',
+    year: '',
+  });
+  const [totalXp, setTotalXp] = useState(0);
   const didAutoSchedule = useRef(false);
+  const pagerRef = useRef<ScrollView>(null);
 
   useEffect(() => {
     loadData();
   }, []);
 
   useEffect(() => {
-    if (step === 'messages' || step === 'home') {
-      refreshChadMessages();
-    }
-    if (step !== 'home') return;
+    if (step !== 'main') return;
+    refreshChadMessages();
     if (antiList.length === 0 && visionList.length === 0) return;
     if (didAutoSchedule.current) return;
     didAutoSchedule.current = true;
@@ -96,19 +115,25 @@ export default function App() {
   const loadData = async () => {
     const anti = await AsyncStorage.getItem('antiVision');
     const vision = await AsyncStorage.getItem('vision');
-    const messages = await loadChadMessages();
+    const [messages, board, xp] = await Promise.all([
+      loadChadMessages(),
+      loadMissionBoard(),
+      loadTotalXp(),
+    ]);
     setChadMessages(messages.slice(0, 10));
+    setMissionBoard(board);
+    setTotalXp(xp);
     if (anti && vision) {
       setAntiList(JSON.parse(anti));
       setVisionList(JSON.parse(vision));
-      setStep('home');
+      setStep('main');
     }
   };
 
   const saveAndContinue = async () => {
     await AsyncStorage.setItem('antiVision', JSON.stringify(antiList));
     await AsyncStorage.setItem('vision', JSON.stringify(visionList));
-    setStep('home');
+    setStep('main');
   };
 
   const openEdit = (target: EditTarget) => {
@@ -154,6 +179,39 @@ export default function App() {
     setStep(step === 'editAnti' ? 'viewAnti' : 'viewVision');
   };
 
+  const persistBoard = async (next: MissionBoard) => {
+    setMissionBoard(next);
+    await saveMissionBoard(next);
+  };
+
+  const addMission = async (category: MissionCategory) => {
+    const text = missionDrafts[category].trim();
+    if (!text) return;
+    const next: MissionBoard = {
+      ...missionBoard,
+      [category]: [createMission(text), ...missionBoard[category]],
+    };
+    setMissionDrafts((prev) => ({ ...prev, [category]: '' }));
+    await persistBoard(next);
+  };
+
+  const completeMission = async (category: MissionCategory, missionId: string) => {
+    const target = missionBoard[category].find((mission) => mission.id === missionId);
+    if (!target || target.completed) return;
+
+    const reward = XP_REWARDS[category];
+    const nextBoard: MissionBoard = {
+      ...missionBoard,
+      [category]: missionBoard[category].map((mission) =>
+        mission.id === missionId ? { ...mission, completed: true } : mission,
+      ),
+    };
+    const nextXp = totalXp + reward;
+    setTotalXp(nextXp);
+    await Promise.all([persistBoard(nextBoard), saveTotalXp(nextXp)]);
+    alert(`+${reward} XP`);
+  };
+
   const sendRealTest = async () => {
     const { status } = await Notifications.requestPermissionsAsync();
     if (status !== 'granted') {
@@ -163,10 +221,8 @@ export default function App() {
 
     const visionRaw = await AsyncStorage.getItem('vision');
     const antiRaw = await AsyncStorage.getItem('antiVision');
-
     const vision: string[] = visionRaw ? JSON.parse(visionRaw) : [];
     const antiVision: string[] = antiRaw ? JSON.parse(antiRaw) : [];
-
     const message = generateTestMessage(vision, antiVision);
 
     await Notifications.scheduleNotificationAsync({
@@ -235,7 +291,14 @@ export default function App() {
     }
   };
 
-  const renderCinematicShell = (content: React.ReactNode, options?: { bottomNav?: boolean }) => (
+  const onPagerScroll = (event: NativeSyntheticEvent<NativeScrollEvent>) => {
+    const index = Math.round(event.nativeEvent.contentOffset.x / PAGE_WIDTH);
+    if (index !== pageIndex && index >= 0 && index < PAGES.length) {
+      setPageIndex(index);
+    }
+  };
+
+  const renderCinematicShell = (content: React.ReactNode) => (
     <ImageBackground
       source={require('./assets/home-cinematic-bg.jpg')}
       style={styles.homeScreen}
@@ -246,25 +309,141 @@ export default function App() {
         locations={[0, 0.55, 1]}
         style={styles.homeOverlay}
       >
-        {options?.bottomNav ? (
-          <View style={styles.homeShell}>{content}</View>
-        ) : (
-          <ScrollView
-            contentContainerStyle={styles.panelContent}
-            keyboardShouldPersistTaps="handled"
-            showsVerticalScrollIndicator={false}
-          >
-            {content}
-          </ScrollView>
-        )}
+        <ScrollView
+          contentContainerStyle={styles.panelContent}
+          keyboardShouldPersistTaps="handled"
+          showsVerticalScrollIndicator={false}
+        >
+          {content}
+        </ScrollView>
       </LinearGradient>
     </ImageBackground>
   );
 
-  const backButton = (
-    <Pressable style={[styles.gameButton, styles.backButton]} onPress={() => setStep('home')}>
-      <Text style={styles.gameButtonText}>BACK</Text>
-    </Pressable>
+  const renderMissionCard = (category: MissionCategory, mission: Mission) => (
+    <View key={mission.id} style={styles.missionCard}>
+      <View style={styles.missionBody}>
+        <Text style={[styles.missionText, mission.completed && styles.missionTextDone]}>
+          {mission.completed ? '✓ ' : ''}
+          {mission.text}
+        </Text>
+        <Text style={styles.missionXp}>+{XP_REWARDS[category]} XP</Text>
+      </View>
+      {!mission.completed ? (
+        <Pressable style={styles.completeButton} onPress={() => completeMission(category, mission.id)}>
+          <Text style={styles.completeButtonText}>COMPLETE</Text>
+        </Pressable>
+      ) : (
+        <Text style={styles.missionDoneLabel}>DONE</Text>
+      )}
+    </View>
+  );
+
+  const renderGoalsPage = () => (
+    <ScrollView
+      style={styles.page}
+      contentContainerStyle={styles.pageScrollContent}
+      keyboardShouldPersistTaps="handled"
+      showsVerticalScrollIndicator={false}
+    >
+      <Text style={styles.pageTitle}>GOALS / MISSIONS</Text>
+      <View style={styles.xpBadge}>
+        <Text style={styles.xpBadgeText}>TOTAL XP  {totalXp}</Text>
+      </View>
+
+      {(['daily', 'quarterly', 'year'] as MissionCategory[]).map((category) => (
+        <View key={category} style={styles.missionSection}>
+          <Text style={styles.sectionTitle}>{CATEGORY_LABELS[category].toUpperCase()}</Text>
+          {missionBoard[category].length === 0 ? (
+            <Text style={styles.chatEmpty}>No missions yet. Add one below.</Text>
+          ) : (
+            missionBoard[category].map((mission) => renderMissionCard(category, mission))
+          )}
+          <View style={styles.addMissionRow}>
+            <TextInput
+              style={[styles.editField, styles.addMissionInput]}
+              placeholder="New mission"
+              placeholderTextColor="rgba(255,255,255,0.35)"
+              value={missionDrafts[category]}
+              onChangeText={(value) =>
+                setMissionDrafts((prev) => ({ ...prev, [category]: value }))
+              }
+              onSubmitEditing={() => addMission(category)}
+              selectionColor="#ffffff"
+            />
+            <Pressable style={styles.addMissionButton} onPress={() => addMission(category)}>
+              <Text style={styles.gameButtonText}>ADD</Text>
+            </Pressable>
+          </View>
+        </View>
+      ))}
+    </ScrollView>
+  );
+
+  const renderMessagesPage = () => (
+    <ScrollView
+      style={styles.page}
+      contentContainerStyle={styles.pageScrollContent}
+      showsVerticalScrollIndicator={false}
+    >
+      <Text style={styles.pageTitle}>MESSAGES</Text>
+      {chadMessages.length === 0 ? (
+        <Text style={styles.chatEmpty}>No messages yet. Schedule or preview from Schedule.</Text>
+      ) : (
+        chadMessages.map((message) => (
+          <View key={`${message.timestamp}-${message.text}`} style={styles.chatRow}>
+            <View style={styles.chatBubble}>
+              <Text style={styles.chatBubbleText}>{message.text}</Text>
+              <Text style={styles.chatTime}>{formatMessageTime(message.timestamp)}</Text>
+            </View>
+          </View>
+        ))
+      )}
+    </ScrollView>
+  );
+
+  const renderSchedulePage = () => (
+    <ScrollView
+      style={styles.page}
+      contentContainerStyle={styles.pageScrollContent}
+      showsVerticalScrollIndicator={false}
+    >
+      <Text style={styles.pageTitle}>SCHEDULE</Text>
+      <Pressable style={styles.gameButton} onPress={onScheduleNext24Hours}>
+        <Text style={styles.gameButtonText}>SCHEDULE NEXT 24 HOURS</Text>
+      </Pressable>
+      <Pressable style={styles.gameButton} onPress={onTestScheduleSoon}>
+        <Text style={styles.gameButtonText}>TEST SCHEDULE IN 30 SECONDS</Text>
+      </Pressable>
+      <Pressable style={styles.gameButton} onPress={sendRealTest}>
+        <Text style={styles.gameButtonText}>SEND TEST MESSAGE FROM CHAD</Text>
+      </Pressable>
+      <Pressable style={[styles.gameButton, styles.gameButtonLast]} onPress={onGeneratePreview}>
+        <Text style={styles.gameButtonText}>GENERATE & PREVIEW MESSAGES</Text>
+      </Pressable>
+    </ScrollView>
+  );
+
+  const renderHomePage = () => (
+    <View style={[styles.page, styles.homePage]}>
+      <View style={styles.homeTop}>
+        <View style={styles.xpBadge}>
+          <Text style={styles.xpBadgeText}>XP  {totalXp}</Text>
+        </View>
+      </View>
+      <View style={styles.homeNav}>
+        <Pressable style={styles.gameButton} onPress={() => setStep('viewVision')}>
+          <Text style={styles.gameButtonText}>VISION</Text>
+        </Pressable>
+        <Pressable
+          style={[styles.gameButton, styles.gameButtonLast]}
+          onPress={() => setStep('viewAnti')}
+        >
+          <Text style={styles.gameButtonText}>ANTI-VISION</Text>
+        </Pressable>
+        <Text style={styles.swipeHint}>SWIPE FOR GOALS · MESSAGES · SCHEDULE</Text>
+      </View>
+    </View>
   );
 
   if (step === 'anti') {
@@ -398,7 +577,9 @@ export default function App() {
   if (step === 'viewVision') {
     return renderCinematicShell(
       <>
-        {backButton}
+        <Pressable style={[styles.gameButton, styles.backButton]} onPress={() => setStep('main')}>
+          <Text style={styles.gameButtonText}>BACK</Text>
+        </Pressable>
         <View style={styles.sectionHeader}>
           <Text style={styles.sectionTitle}>VISION</Text>
           <Pressable onPress={() => openEdit('vision')} hitSlop={8}>
@@ -422,7 +603,9 @@ export default function App() {
   if (step === 'viewAnti') {
     return renderCinematicShell(
       <>
-        {backButton}
+        <Pressable style={[styles.gameButton, styles.backButton]} onPress={() => setStep('main')}>
+          <Text style={styles.gameButtonText}>BACK</Text>
+        </Pressable>
         <View style={styles.sectionHeader}>
           <Text style={styles.sectionTitle}>ANTI-VISION</Text>
           <Pressable onPress={() => openEdit('antiVision')} hitSlop={8}>
@@ -443,71 +626,43 @@ export default function App() {
     );
   }
 
-  if (step === 'messages') {
-    return renderCinematicShell(
-      <>
-        {backButton}
-        <View style={styles.sectionHeader}>
-          <Text style={styles.sectionTitle}>MESSAGES</Text>
-        </View>
-        {chadMessages.length === 0 ? (
-          <Text style={styles.chatEmpty}>No messages yet. Schedule or preview from Schedule.</Text>
-        ) : (
-          chadMessages.map((message) => (
-            <View key={`${message.timestamp}-${message.text}`} style={styles.chatRow}>
-              <View style={styles.chatBubble}>
-                <Text style={styles.chatBubbleText}>{message.text}</Text>
-                <Text style={styles.chatTime}>{formatMessageTime(message.timestamp)}</Text>
-              </View>
-            </View>
-          ))
-        )}
-      </>,
-    );
-  }
-
-  if (step === 'schedule') {
-    return renderCinematicShell(
-      <>
-        {backButton}
-        <View style={styles.sectionHeader}>
-          <Text style={styles.sectionTitle}>SCHEDULE</Text>
-        </View>
-        <Pressable style={styles.gameButton} onPress={onScheduleNext24Hours}>
-          <Text style={styles.gameButtonText}>SCHEDULE NEXT 24 HOURS</Text>
-        </Pressable>
-        <Pressable style={styles.gameButton} onPress={onTestScheduleSoon}>
-          <Text style={styles.gameButtonText}>TEST SCHEDULE IN 30 SECONDS</Text>
-        </Pressable>
-        <Pressable style={styles.gameButton} onPress={sendRealTest}>
-          <Text style={styles.gameButtonText}>SEND TEST MESSAGE FROM CHAD</Text>
-        </Pressable>
-        <Pressable style={[styles.gameButton, styles.gameButtonLast]} onPress={onGeneratePreview}>
-          <Text style={styles.gameButtonText}>GENERATE & PREVIEW MESSAGES</Text>
-        </Pressable>
-      </>,
-    );
-  }
-
-  return renderCinematicShell(
-    <View style={styles.homeNav}>
-      <Pressable style={styles.gameButton} onPress={() => setStep('viewVision')}>
-        <Text style={styles.gameButtonText}>VISION</Text>
-      </Pressable>
-      <Pressable style={styles.gameButton} onPress={() => setStep('viewAnti')}>
-        <Text style={styles.gameButtonText}>ANTI-VISION</Text>
-      </Pressable>
-      <Pressable style={styles.gameButton} onPress={() => setStep('messages')}>
-        <Text style={styles.gameButtonText}>MESSAGES</Text>
-      </Pressable>
-      <Pressable
-        style={[styles.gameButton, styles.gameButtonLast]}
-        onPress={() => setStep('schedule')}
+  return (
+    <ImageBackground
+      source={require('./assets/home-cinematic-bg.jpg')}
+      style={styles.homeScreen}
+      resizeMode="cover"
+    >
+      <LinearGradient
+        colors={['rgba(0,0,0,0.28)', 'rgba(0,0,0,0.32)', 'rgba(0,0,0,0.42)']}
+        locations={[0, 0.55, 1]}
+        style={styles.homeOverlay}
       >
-        <Text style={styles.gameButtonText}>SCHEDULE</Text>
-      </Pressable>
-    </View>,
-    { bottomNav: true },
+        <ScrollView
+          ref={pagerRef}
+          horizontal
+          pagingEnabled
+          showsHorizontalScrollIndicator={false}
+          onMomentumScrollEnd={onPagerScroll}
+          onScroll={onPagerScroll}
+          scrollEventThrottle={16}
+          style={styles.pager}
+        >
+          <View style={styles.pageSlide}>{renderHomePage()}</View>
+          <View style={styles.pageSlide}>{renderGoalsPage()}</View>
+          <View style={styles.pageSlide}>{renderMessagesPage()}</View>
+          <View style={styles.pageSlide}>{renderSchedulePage()}</View>
+        </ScrollView>
+
+        <View style={styles.dots}>
+          {PAGES.map((page, index) => (
+            <View
+              key={page}
+              style={[styles.dot, index === pageIndex && styles.dotActive]}
+            />
+          ))}
+        </View>
+      </LinearGradient>
+    </ImageBackground>
   );
 }
 
@@ -518,23 +673,78 @@ const styles = StyleSheet.create({
   input: { borderWidth: 1, borderColor: '#ccc', padding: 12, marginBottom: 10, borderRadius: 8 },
   item: { fontSize: 16, marginVertical: 4 },
   homeScreen: { flex: 1, backgroundColor: '#0a0a0a' },
-  homeOverlay: {
-    flex: 1,
-  },
-  homeShell: {
-    flex: 1,
-    justifyContent: 'flex-end',
+  homeOverlay: { flex: 1 },
+  pager: { flex: 1 },
+  pageSlide: { width: PAGE_WIDTH, flex: 1 },
+  page: { flex: 1, width: PAGE_WIDTH },
+  homePage: { justifyContent: 'space-between' },
+  homeTop: {
+    paddingTop: 56,
     paddingHorizontal: 20,
-    paddingBottom: 44,
+    alignItems: 'flex-start',
   },
   homeNav: {
-    width: '100%',
+    paddingHorizontal: 20,
+    paddingBottom: 28,
+  },
+  pageScrollContent: {
+    paddingHorizontal: 20,
+    paddingTop: 56,
+    paddingBottom: 40,
   },
   panelContent: {
     flexGrow: 1,
     paddingHorizontal: 20,
     paddingTop: 56,
     paddingBottom: 40,
+  },
+  pageTitle: {
+    fontSize: 16,
+    fontWeight: '700',
+    color: '#ffffff',
+    letterSpacing: 2.4,
+    marginBottom: 14,
+  },
+  xpBadge: {
+    alignSelf: 'flex-start',
+    backgroundColor: 'rgba(0,0,0,0.55)',
+    borderColor: 'rgba(255,255,255,0.28)',
+    borderWidth: 1,
+    borderRadius: 8,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    marginBottom: 18,
+  },
+  xpBadgeText: {
+    color: '#ffffff',
+    fontSize: 12,
+    fontWeight: '700',
+    letterSpacing: 1.6,
+  },
+  swipeHint: {
+    marginTop: 14,
+    color: 'rgba(255,255,255,0.45)',
+    fontSize: 10,
+    letterSpacing: 1.4,
+    textAlign: 'center',
+  },
+  dots: {
+    flexDirection: 'row',
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingBottom: 18,
+    gap: 8,
+  },
+  dot: {
+    width: 7,
+    height: 7,
+    borderRadius: 4,
+    backgroundColor: 'rgba(255,255,255,0.28)',
+  },
+  dotActive: {
+    backgroundColor: '#ffffff',
+    width: 8,
+    height: 8,
   },
   backButton: {
     alignSelf: 'flex-start',
@@ -568,10 +778,11 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
   },
   sectionTitle: {
-    fontSize: 13,
+    fontSize: 12,
     fontWeight: '700',
     color: '#ffffff',
-    letterSpacing: 2,
+    letterSpacing: 1.8,
+    marginBottom: 10,
   },
   editLink: {
     color: 'rgba(255,255,255,0.85)',
@@ -592,7 +803,7 @@ const styles = StyleSheet.create({
   },
   cardBullet: { color: 'rgba(255,255,255,0.55)', fontSize: 15, marginRight: 10, marginTop: 1 },
   cardText: { flex: 1, color: '#ffffff', fontSize: 15, lineHeight: 21 },
-  chatEmpty: { color: 'rgba(255,255,255,0.55)', fontSize: 13, marginBottom: 8 },
+  chatEmpty: { color: 'rgba(255,255,255,0.55)', fontSize: 13, marginBottom: 10 },
   chatRow: { alignItems: 'flex-start', marginBottom: 10 },
   chatBubble: {
     maxWidth: '88%',
@@ -606,6 +817,71 @@ const styles = StyleSheet.create({
   },
   chatBubbleText: { color: '#ffffff', fontSize: 14, lineHeight: 20 },
   chatTime: { color: 'rgba(255,255,255,0.45)', fontSize: 11, marginTop: 6 },
+  missionSection: { marginBottom: 24 },
+  missionCard: {
+    backgroundColor: 'rgba(0,0,0,0.5)',
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.12)',
+    padding: 12,
+    marginBottom: 8,
+  },
+  missionBody: { marginBottom: 10 },
+  missionText: { color: '#ffffff', fontSize: 15, lineHeight: 21 },
+  missionTextDone: {
+    textDecorationLine: 'line-through',
+    color: 'rgba(180,255,180,0.9)',
+  },
+  missionXp: {
+    marginTop: 4,
+    color: 'rgba(255,255,255,0.45)',
+    fontSize: 11,
+    letterSpacing: 1,
+  },
+  completeButton: {
+    alignSelf: 'flex-start',
+    height: 34,
+    paddingHorizontal: 12,
+    borderRadius: 7,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.28)',
+    backgroundColor: 'rgba(0,0,0,0.45)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  completeButtonText: {
+    color: '#ffffff',
+    fontSize: 11,
+    fontWeight: '700',
+    letterSpacing: 1.2,
+  },
+  missionDoneLabel: {
+    color: '#8dff9a',
+    fontSize: 11,
+    fontWeight: '700',
+    letterSpacing: 1.2,
+  },
+  addMissionRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginTop: 4,
+  },
+  addMissionInput: {
+    flex: 1,
+    marginBottom: 0,
+    marginRight: 8,
+  },
+  addMissionButton: {
+    height: 46,
+    minWidth: 72,
+    paddingHorizontal: 12,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.28)',
+    backgroundColor: 'rgba(0,0,0,0.55)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
   editScreen: {
     flex: 1,
     backgroundColor: '#0a0a0a',
