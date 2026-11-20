@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { View, Text, TextInput, Button, FlatList, StyleSheet } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as Notifications from 'expo-notifications';
+import { generateTestMessage } from './lib/messageGenerator';
 
 Notifications.setNotificationHandler({
   handleNotification: async () => ({
@@ -40,23 +41,29 @@ export default function App() {
     setStep('home');
   };
 
-  const sendTestMessage = async () => {
+  const sendRealTest = async () => {
     const { status } = await Notifications.requestPermissionsAsync();
     if (status !== 'granted') {
       alert('Permission not granted');
       return;
     }
 
+    const visionRaw = await AsyncStorage.getItem('vision');
+    const antiRaw = await AsyncStorage.getItem('antiVision');
+
+    const vision = visionRaw ? JSON.parse(visionRaw) : [];
+    const antiVision = antiRaw ? JSON.parse(antiRaw) : [];
+
+    const message = generateTestMessage(vision, antiVision);
+
     await Notifications.scheduleNotificationAsync({
       content: {
         title: 'Chad',
-        body: 'You will get that 8 supercar garage.',
+        body: message,
         sound: 'default',
       },
-      trigger: null, // fires immediately
+      trigger: null,
     });
-
-    alert('Test message scheduled');
   };
 
   if (step === 'anti') {
@@ -129,7 +136,7 @@ export default function App() {
     <View style={styles.container}>
       <Text style={styles.title}>Chad is ready</Text>
       <Text style={styles.sub}>Your lists are saved.</Text>
-      <Button title="SEND TEST MESSAGE FROM CHAD" onPress={sendTestMessage} />
+      <Button title="SEND TEST MESSAGE FROM CHAD" onPress={sendRealTest} />
       <Text style={{ marginTop: 30, fontWeight: 'bold' }}>Anti-Vision:</Text>
       {antiList.map((item, i) => <Text key={i}>• {item}</Text>)}
       <Text style={{ marginTop: 20, fontWeight: 'bold' }}>Vision:</Text>
