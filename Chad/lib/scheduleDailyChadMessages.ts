@@ -1,5 +1,6 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as Notifications from 'expo-notifications';
+import { saveChadMessages } from './chadMessages';
 import { ChadMessageKind, generateMessageByKind } from './messageGenerator';
 
 const DAILY_SLOTS: { hour: number; minute: number; kind: ChadMessageKind }[] = [
@@ -38,9 +39,10 @@ export async function scheduleDailyChadMessages(): Promise<number> {
 
     await Notifications.cancelAllScheduledNotificationsAsync();
 
-    let scheduled = 0;
+    const bodies: string[] = [];
     for (const slot of DAILY_SLOTS) {
       const body = generateMessageByKind(slot.kind, vision, antiVision);
+      bodies.push(body);
 
       // Expo SDK 58 requires `type`. `{ hour, minute, repeats: true }` alone is rejected.
       // DAILY triggers already repeat every day; `repeats: true` is kept for clarity.
@@ -57,10 +59,10 @@ export async function scheduleDailyChadMessages(): Promise<number> {
           repeats: true,
         } as Notifications.NotificationTriggerInput,
       });
-      scheduled += 1;
     }
 
-    return scheduled;
+    await saveChadMessages(bodies);
+    return bodies.length;
   } catch {
     return 0;
   }

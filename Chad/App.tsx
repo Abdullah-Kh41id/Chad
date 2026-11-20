@@ -11,6 +11,12 @@ import {
 } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as Notifications from 'expo-notifications';
+import {
+  ChadMessage,
+  formatMessageTime,
+  loadChadMessages,
+  saveChadMessage,
+} from './lib/chadMessages';
 import { generateTestMessage } from './lib/messageGenerator';
 import { scheduleDailyChadMessages } from './lib/scheduleDailyChadMessages';
 
@@ -34,6 +40,7 @@ export default function App() {
   const [visionList, setVisionList] = useState<string[]>([]);
   const [editDraft, setEditDraft] = useState<string[]>([]);
   const [editNewItem, setEditNewItem] = useState('');
+  const [chadMessages, setChadMessages] = useState<ChadMessage[]>([]);
   const didAutoSchedule = useRef(false);
 
   useEffect(() => {
@@ -42,15 +49,25 @@ export default function App() {
 
   useEffect(() => {
     if (step !== 'home') return;
+    refreshChadMessages();
     if (antiList.length === 0 && visionList.length === 0) return;
     if (didAutoSchedule.current) return;
     didAutoSchedule.current = true;
-    scheduleDailyChadMessages();
+    scheduleDailyChadMessages().then(() => {
+      refreshChadMessages();
+    });
   }, [step, antiList.length, visionList.length]);
+
+  const refreshChadMessages = async () => {
+    const messages = await loadChadMessages();
+    setChadMessages(messages.slice(0, 10));
+  };
 
   const loadData = async () => {
     const anti = await AsyncStorage.getItem('antiVision');
     const vision = await AsyncStorage.getItem('vision');
+    const messages = await loadChadMessages();
+    setChadMessages(messages.slice(0, 10));
     if (anti && vision) {
       setAntiList(JSON.parse(anti));
       setVisionList(JSON.parse(vision));
@@ -123,11 +140,15 @@ export default function App() {
       },
       trigger: null,
     });
+
+    const updated = await saveChadMessage(message);
+    setChadMessages(updated.slice(0, 10));
   };
 
   const onScheduleDaily = async () => {
     try {
       const count = await scheduleDailyChadMessages();
+      await refreshChadMessages();
       if (!count) {
         alert('Could not schedule. Check notification permission and saved lists.');
         return;
@@ -288,6 +309,22 @@ export default function App() {
           <Text style={styles.cardText}>{item}</Text>
         </View>
       ))}
+
+      <View style={styles.sectionHeader}>
+        <Text style={styles.sectionTitle}>Chad messages</Text>
+      </View>
+      {chadMessages.length === 0 ? (
+        <Text style={styles.chatEmpty}>No messages yet. Send a test or schedule daily messages.</Text>
+      ) : (
+        chadMessages.map((message) => (
+          <View key={`${message.timestamp}-${message.text}`} style={styles.chatRow}>
+            <View style={styles.chatBubble}>
+              <Text style={styles.chatBubbleText}>{message.text}</Text>
+              <Text style={styles.chatTime}>{formatMessageTime(message.timestamp)}</Text>
+            </View>
+          </View>
+        ))
+      )}
     </ScrollView>
   );
 }
@@ -334,6 +371,18 @@ const styles = StyleSheet.create({
   },
   cardBullet: { color: '#007AFF', fontSize: 16, marginRight: 10, marginTop: 1 },
   cardText: { flex: 1, color: '#ffffff', fontSize: 16, lineHeight: 22 },
+  chatEmpty: { color: '#888888', fontSize: 14, marginBottom: 8 },
+  chatRow: { alignItems: 'flex-start', marginBottom: 10 },
+  chatBubble: {
+    maxWidth: '88%',
+    backgroundColor: '#2a2a2a',
+    borderRadius: 16,
+    borderTopLeftRadius: 4,
+    paddingVertical: 12,
+    paddingHorizontal: 14,
+  },
+  chatBubbleText: { color: '#ffffff', fontSize: 15, lineHeight: 21 },
+  chatTime: { color: '#8a8a8a', fontSize: 11, marginTop: 6 },
   editList: { flexGrow: 0, maxHeight: 360, marginBottom: 12 },
   editRow: { flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 4 },
   editInput: { flex: 1, marginBottom: 0 },
