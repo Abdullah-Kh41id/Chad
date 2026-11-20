@@ -24,7 +24,7 @@ import {
   generateTestMessage,
 } from './lib/messageGenerator';
 import {
-  scheduleDailyChadMessages,
+  scheduleNext24Hours,
   scheduleSoonTestNotifications,
 } from './lib/scheduleDailyChadMessages';
 
@@ -69,7 +69,7 @@ export default function App() {
     if (antiList.length === 0 && visionList.length === 0) return;
     if (didAutoSchedule.current) return;
     didAutoSchedule.current = true;
-    scheduleDailyChadMessages().then(() => {
+    scheduleNext24Hours().then(() => {
       refreshChadMessages();
     });
   }, [step, antiList.length, visionList.length]);
@@ -161,17 +161,15 @@ export default function App() {
     setChadMessages(updated.slice(0, 10));
   };
 
-  const onScheduleDaily = async () => {
+  const onScheduleNext24Hours = async () => {
     try {
-      const { scheduled, confirmed, exampleMessage } = await scheduleDailyChadMessages();
+      const { scheduled } = await scheduleNext24Hours();
       await refreshChadMessages();
       if (!scheduled) {
         alert('Could not schedule. Check notification permission and saved lists.');
         return;
       }
-      alert(
-        `${confirmed} daily notifications successfully scheduled\n\nExample: ${exampleMessage}`,
-      );
+      alert('Scheduled 6 messages from Chad over the next 24 hours');
     } catch {
       alert('Could not schedule. Check notification permission and saved lists.');
     }
@@ -337,8 +335,8 @@ export default function App() {
       <Pressable style={styles.accentButton} onPress={sendRealTest}>
         <Text style={styles.accentButtonText}>SEND TEST MESSAGE FROM CHAD</Text>
       </Pressable>
-      <Pressable style={styles.accentButton} onPress={onScheduleDaily}>
-        <Text style={styles.accentButtonText}>Schedule Daily Messages</Text>
+      <Pressable style={styles.accentButton} onPress={onScheduleNext24Hours}>
+        <Text style={styles.accentButtonText}>Schedule Next 24 Hours</Text>
       </Pressable>
       <Pressable
         style={[styles.accentButton, styles.debugButton]}

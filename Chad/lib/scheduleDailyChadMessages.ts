@@ -3,12 +3,13 @@ import * as Notifications from 'expo-notifications';
 import { saveChadMessages } from './chadMessages';
 import { ChadMessageKind, generateMessageByKind } from './messageGenerator';
 
-const DAILY_SLOTS: { hour: number; minute: number; kind: ChadMessageKind }[] = [
-  { hour: 7, minute: 0, kind: 'affirmation' },
-  { hour: 7, minute: 10, kind: 'accountability' },
-  { hour: 12, minute: 30, kind: 'sideQuest' },
-  { hour: 15, minute: 0, kind: 'affirmation' },
-  { hour: 21, minute: 0, kind: 'accountability' },
+const NEXT_24H_SLOTS: { seconds: number; kind: ChadMessageKind }[] = [
+  { seconds: 2 * 60, kind: 'affirmation' },
+  { seconds: 30 * 60, kind: 'accountability' },
+  { seconds: 2 * 60 * 60, kind: 'sideQuest' },
+  { seconds: 6 * 60 * 60, kind: 'affirmation' },
+  { seconds: 12 * 60 * 60, kind: 'accountability' },
+  { seconds: 20 * 60 * 60, kind: 'sideQuest' },
 ];
 
 const SOON_TEST_SLOTS: { seconds: number; kind: ChadMessageKind }[] = [
@@ -44,58 +45,72 @@ async function loadVisionLists(): Promise<{ vision: string[]; antiVision: string
   return { vision, antiVision };
 }
 
-/**
- * Same reliable flow as the short-delay test:
- * request permission → cancel all → scheduleNotificationAsync → verify with getAll.
- */
-export async function scheduleDailyChadMessages(): Promise<ScheduleResult> {
-  try {
-    const allowed = await requestNotificationPermission();
-    if (!allowed) {
-      return { scheduled: 0, confirmed: 0, exampleMessage: '' };
-    }
-
-    const lists = await loadVisionLists();
-    if (!lists) {
-      return { scheduled: 0, confirmed: 0, exampleMessage: '' };
-    }
-
-    const { vision, antiVision } = lists;
-    await Notifications.cancelAllScheduledNotificationsAsync();
-
-    const bodies: string[] = [];
-    for (const slot of DAILY_SLOTS) {
-      const body = generateMessageByKind(slot.kind, vision, antiVision);
-      bodies.push(body);
-
-      await Notifications.scheduleNotificationAsync({
-        content: {
-          title: 'Chad',
-          body,
-          sound: 'default',
-        },
-        trigger: {
-          type: Notifications.SchedulableTriggerInputTypes.DAILY,
-          hour: slot.hour,
-          minute: slot.minute,
-          repeats: true,
-        } as Notifications.NotificationTriggerInput,
-      });
-    }
-
-    const all = await Notifications.getAllScheduledNotificationsAsync();
-    console.log('[Chad] scheduled daily notifications:', JSON.stringify(all, null, 2));
-
-    await saveChadMessages(bodies);
-    return {
-      scheduled: bodies.length,
-      confirmed: all.length,
-      exampleMessage: bodies[0] ?? '',
-    };
-  } catch (error) {
-    console.log('[Chad] scheduleDailyChadMessages error:', error);
+async function scheduleOffsetMessages(
+  slots: { seconds: number; kind: ChadMessageKind }[],
+): Promise<ScheduleResult> {
+  const allowed = await requestNotificationPermission();
+  if (!allowed) {
     return { scheduled: 0, confirmed: 0, exampleMessage: '' };
   }
+
+  const lists = await loadVisionLists();
+  if (!lists) {
+    return { scheduled: 0, confirmed: 0, exampleMessage: '' };
+  }
+
+  const { vision, antiVision } = lists;
+  await Notifications.cancelAllScheduledNotificationsAsync();
+
+  const now = Date.now();
+  const bodies: string[] = [];
+  const fireTimes: number[] = [];
+  for (const slot of slots) {
+    const body = generateMessageByKind(slot.kind, vision, antiVision);
+    bodies.push(body);
+    fireTimes.push(now + slot.seconds * 1000);
+
+    await Notifications.scheduleNotificationAsync({
+      content: {
+        title: 'Chad',
+        body,
+        sound: 'default',
+      },
+      trigger: {
+        type: Notifications.SchedulableTriggerInputTypes.TIME_INTERVAL,
+        seconds: slot.seconds,
+        repeats: false,
+      },
+    });
+  }
+
+  await saveChadMessages(bodies, fireTimes);
+
+  const all = await Notifications.getAllScheduledNotificationsAsync();
+  console.log('[Chad] scheduled offset notifications:', JSON.stringify(all, null, 2));
+
+  return {
+    scheduled: bodies.length,
+    confirmed: all.length,
+    exampleMessage: bodies[0] ?? '',
+  };
+}
+
+/**
+ * Schedule 6 one-off Chad notifications across the next 24 hours.
+ * Uses the same TIME_INTERVAL trigger style that works in Expo Go.
+ */
+export async function scheduleNext24Hours(): Promise<ScheduleResult> {
+  try {
+    return await scheduleOffsetMessages(NEXT_24H_SLOTS);
+  } catch (error) {
+    console.log('[Chad] scheduleNext24Hours error:', error);
+    return { scheduled: 0, confirmed: 0, exampleMessage: '' };
+  }
+}
+
+/** @deprecated Use scheduleNext24Hours */
+export async function scheduleDailyChadMessages(): Promise<ScheduleResult> {
+  return scheduleNext24Hours();
 }
 
 /**
@@ -103,48 +118,7 @@ export async function scheduleDailyChadMessages(): Promise<ScheduleResult> {
  */
 export async function scheduleSoonTestNotifications(): Promise<ScheduleResult> {
   try {
-    const allowed = await requestNotificationPermission();
-    if (!allowed) {
-      return { scheduled: 0, confirmed: 0, exampleMessage: '' };
-    }
-
-    const lists = await loadVisionLists();
-    if (!lists) {
-      return { scheduled: 0, confirmed: 0, exampleMessage: '' };
-    }
-
-    const { vision, antiVision } = lists;
-    await Notifications.cancelAllScheduledNotificationsAsync();
-
-    const bodies: string[] = [];
-    for (const slot of SOON_TEST_SLOTS) {
-      const body = generateMessageByKind(slot.kind, vision, antiVision);
-      bodies.push(body);
-
-      await Notifications.scheduleNotificationAsync({
-        content: {
-          title: 'Chad',
-          body,
-          sound: 'default',
-        },
-        trigger: {
-          type: Notifications.SchedulableTriggerInputTypes.TIME_INTERVAL,
-          seconds: slot.seconds,
-          repeats: false,
-        },
-      });
-    }
-
-    await saveChadMessages(bodies);
-
-    const all = await Notifications.getAllScheduledNotificationsAsync();
-    console.log('[Chad] soon test scheduled notifications:', JSON.stringify(all, null, 2));
-
-    return {
-      scheduled: bodies.length,
-      confirmed: all.length,
-      exampleMessage: bodies[0] ?? '',
-    };
+    return await scheduleOffsetMessages(SOON_TEST_SLOTS);
   } catch (error) {
     console.log('[Chad] scheduleSoonTestNotifications error:', error);
     return { scheduled: 0, confirmed: 0, exampleMessage: '' };

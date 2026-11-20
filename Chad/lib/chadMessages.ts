@@ -44,19 +44,22 @@ export async function saveChadMessage(text: string): Promise<ChadMessage[]> {
   return next;
 }
 
-export async function saveChadMessages(texts: string[]): Promise<ChadMessage[]> {
+export async function saveChadMessages(
+  texts: string[],
+  timestamps?: number[],
+): Promise<ChadMessage[]> {
   let messages = await loadChadMessages();
   const now = Date.now();
 
   const additions: ChadMessage[] = texts
     .map((text, index) => ({
       text: text.trim(),
-      // Slight offset so reverse-chronological order matches schedule order.
-      timestamp: now + index,
+      timestamp: timestamps?.[index] ?? now + index,
     }))
-    .filter((item) => item.text.length > 0);
+    .filter((item) => item.text.length > 0)
+    .sort((a, b) => b.timestamp - a.timestamp);
 
-  messages = [...additions.reverse(), ...messages].slice(0, MAX_STORED);
+  messages = [...additions, ...messages].slice(0, MAX_STORED);
   await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(messages));
   return messages;
 }
