@@ -16,12 +16,25 @@ import {
   formatMessageTime,
   loadChadMessages,
   saveChadMessage,
+  saveChadMessages,
 } from './lib/chadMessages';
-import { generateTestMessage } from './lib/messageGenerator';
+import {
+  ChadMessageKind,
+  generateMessageByKind,
+  generateTestMessage,
+} from './lib/messageGenerator';
 import {
   scheduleDailyChadMessages,
   scheduleSoonTestNotifications,
 } from './lib/scheduleDailyChadMessages';
+
+const PREVIEW_KINDS: ChadMessageKind[] = [
+  'affirmation',
+  'accountability',
+  'sideQuest',
+  'affirmation',
+  'accountability',
+];
 
 Notifications.setNotificationHandler({
   handleNotification: async () => ({
@@ -180,6 +193,29 @@ export default function App() {
     }
   };
 
+  const onGeneratePreview = async () => {
+    try {
+      const visionRaw = await AsyncStorage.getItem('vision');
+      const antiRaw = await AsyncStorage.getItem('antiVision');
+      const vision: string[] = visionRaw ? JSON.parse(visionRaw) : [];
+      const antiVision: string[] = antiRaw ? JSON.parse(antiRaw) : [];
+
+      if (vision.length === 0 && antiVision.length === 0) {
+        alert('Add vision or anti-vision items first.');
+        return;
+      }
+
+      const bodies = PREVIEW_KINDS.map((kind) =>
+        generateMessageByKind(kind, vision, antiVision),
+      );
+      const updated = await saveChadMessages(bodies);
+      setChadMessages(updated.slice(0, 10));
+      alert(`Preview ready\n\nExample: ${bodies[0]}`);
+    } catch {
+      alert('Could not generate preview messages.');
+    }
+  };
+
   if (step === 'anti') {
     return (
       <View style={styles.container}>
@@ -305,10 +341,16 @@ export default function App() {
         <Text style={styles.accentButtonText}>Schedule Daily Messages</Text>
       </Pressable>
       <Pressable
-        style={[styles.accentButton, styles.accentButtonSecondary, styles.debugButton]}
+        style={[styles.accentButton, styles.debugButton]}
         onPress={onTestScheduleSoon}
       >
         <Text style={styles.accentButtonText}>Test Schedule in 30 seconds</Text>
+      </Pressable>
+      <Pressable
+        style={[styles.accentButton, styles.accentButtonSecondary, styles.previewButton]}
+        onPress={onGeneratePreview}
+      >
+        <Text style={styles.accentButtonText}>Generate & Preview Messages</Text>
       </Pressable>
 
       <View style={styles.sectionHeader}>
@@ -376,6 +418,7 @@ const styles = StyleSheet.create({
   },
   accentButtonSecondary: { marginBottom: 8 },
   debugButton: { backgroundColor: '#333333', borderWidth: 1, borderColor: '#007AFF' },
+  previewButton: { backgroundColor: '#1c1c1c', borderWidth: 1, borderColor: '#555555' },
   accentButtonText: { color: '#ffffff', fontSize: 15, fontWeight: '700', letterSpacing: 0.2 },
   sectionHeader: {
     marginTop: 28,
