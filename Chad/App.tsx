@@ -18,7 +18,10 @@ import {
   saveChadMessage,
 } from './lib/chadMessages';
 import { generateTestMessage } from './lib/messageGenerator';
-import { scheduleDailyChadMessages } from './lib/scheduleDailyChadMessages';
+import {
+  scheduleDailyChadMessages,
+  scheduleSoonTestNotifications,
+} from './lib/scheduleDailyChadMessages';
 
 Notifications.setNotificationHandler({
   handleNotification: async () => ({
@@ -147,15 +150,35 @@ export default function App() {
 
   const onScheduleDaily = async () => {
     try {
-      const count = await scheduleDailyChadMessages();
+      const { scheduled, confirmed } = await scheduleDailyChadMessages();
       await refreshChadMessages();
-      if (!count) {
+      if (!scheduled) {
         alert('Could not schedule. Check notification permission and saved lists.');
         return;
       }
-      alert(`Scheduled ${count} messages from Chad`);
+      if (confirmed === 0) {
+        alert(
+          `Scheduled ${scheduled} messages from Chad\n\nNote: getAllScheduledNotificationsAsync returned an empty array after scheduling.`,
+        );
+        return;
+      }
+      alert(`Scheduled ${scheduled} messages from Chad`);
     } catch {
       alert('Could not schedule. Check notification permission and saved lists.');
+    }
+  };
+
+  const onTestScheduleSoon = async () => {
+    try {
+      const count = await scheduleSoonTestNotifications();
+      await refreshChadMessages();
+      if (!count) {
+        alert('Could not schedule test notifications. Check permission.');
+        return;
+      }
+      alert('3 test notifications scheduled');
+    } catch {
+      alert('Could not schedule test notifications. Check permission.');
     }
   };
 
@@ -280,8 +303,14 @@ export default function App() {
       <Pressable style={styles.accentButton} onPress={sendRealTest}>
         <Text style={styles.accentButtonText}>SEND TEST MESSAGE FROM CHAD</Text>
       </Pressable>
-      <Pressable style={[styles.accentButton, styles.accentButtonSecondary]} onPress={onScheduleDaily}>
+      <Pressable style={styles.accentButton} onPress={onScheduleDaily}>
         <Text style={styles.accentButtonText}>Schedule Daily Messages</Text>
+      </Pressable>
+      <Pressable
+        style={[styles.accentButton, styles.accentButtonSecondary, styles.debugButton]}
+        onPress={onTestScheduleSoon}
+      >
+        <Text style={styles.accentButtonText}>Test Schedule in 30 seconds</Text>
       </Pressable>
 
       <View style={styles.sectionHeader}>
@@ -348,6 +377,7 @@ const styles = StyleSheet.create({
     marginBottom: 12,
   },
   accentButtonSecondary: { marginBottom: 8 },
+  debugButton: { backgroundColor: '#333333', borderWidth: 1, borderColor: '#007AFF' },
   accentButtonText: { color: '#ffffff', fontSize: 15, fontWeight: '700', letterSpacing: 0.2 },
   sectionHeader: {
     marginTop: 28,
