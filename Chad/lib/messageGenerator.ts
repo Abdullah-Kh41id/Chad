@@ -21,163 +21,248 @@ function shuffle<T>(items: T[]): T[] {
   return copy;
 }
 
-function clean(text: string): string {
+/** Strip bullets, extra spaces, trailing punctuation. */
+export function normalizePhrase(text: string): string {
   return text
     .trim()
     .replace(/\s+/g, ' ')
     .replace(/^[.•\-\s]+/, '')
-    .replace(/\.$/, '');
+    .replace(/[.!?]+$/g, '')
+    .trim();
 }
 
-function lower(text: string): string {
-  return clean(text).toLowerCase();
+/** Capitalize first letter and ensure a terminal period. */
+export function finalizeSentence(message: string): string {
+  const compact = message.trim().replace(/\s+/g, ' ');
+  if (!compact) return '';
+
+  const withCap = compact.charAt(0).toUpperCase() + compact.slice(1);
+  if (/[.!?]$/.test(withCap)) return withCap;
+  return `${withCap}.`;
 }
 
-/** Prefer short phrases; soft-cap near 120 characters. */
-function trimMessage(message: string, max = 120): string {
+function softTrim(message: string, max = 120): string {
   const compact = message.trim().replace(/\s+/g, ' ');
   if (compact.length <= max) return compact;
   const cut = compact.slice(0, max - 1);
   const lastSpace = cut.lastIndexOf(' ');
-  return `${(lastSpace > 40 ? cut.slice(0, lastSpace) : cut).trim()}.`;
+  return (lastSpace > 40 ? cut.slice(0, lastSpace) : cut).trim();
 }
 
-function asVisionOutcome(goal: string): string {
-  const g = lower(goal);
-  if (/^(get|build|own|become|have|make|earn|buy|create|find|win)\b/.test(g)) {
-    return g;
+const LEADING_VERBS =
+  /^(wake|waking|make|making|have|having|build|building|get|getting|own|owning|become|becoming|earn|earning|buy|buying|create|creating|find|finding|win|winning|start|starting|stop|stopping|quit|quitting|move|moving|live|living|run|running|launch|launching|grow|growing|reach|reaching|finish|finishing|take|taking|do|doing|be|being|call|calling|close|closing|send|sending|write|writing|read|reading|train|training|ship|shipping|sell|selling|hire|hiring|fix|fixing|pay|paying|save|saving|invest|investing)\b/i;
+
+function startsWithVerb(phrase: string): boolean {
+  return LEADING_VERBS.test(normalizePhrase(phrase));
+}
+
+/** Natural affirmation body without the "You will" prefix. */
+export function toAffirmationClause(visionItem: string): string {
+  const phrase = normalizePhrase(visionItem);
+  if (!phrase) return 'become the man you wrote down';
+
+  const lower = phrase.toLowerCase();
+
+  // Already a clean "You will ..." style item.
+  if (/^you will\b/i.test(phrase)) {
+    return normalizePhrase(phrase.replace(/^you will\s+/i, '')).toLowerCase();
   }
-  return `get ${g}`;
-}
 
-function asAntiBehavior(bad: string): string {
-  const b = lower(bad);
-  if (
-    /^(doomscrolling|scrolling|procrastinating|overthinking|sleeping in|skipping|avoiding|binging)/.test(
-      b,
-    )
-  ) {
-    return b;
+  // Verb-led goals: "wake up in your mansion..." / "make it big" / "call the lawyer"
+  if (startsWithVerb(phrase)) {
+    return lower;
   }
-  if (b.startsWith('being ')) return b.slice(6);
-  return b;
+
+  // Wealth / asset noun phrases
+  if (/net\s*worth|networth|fortune|empire|garage|mansion|business/i.test(phrase)) {
+    if (/^\d/.test(lower) || /net\s*worth|networth/i.test(lower)) {
+      return `reach ${lower}`;
+    }
+    return `build ${lower}`;
+  }
+
+  // Default noun phrase
+  return `get ${lower}`;
 }
 
-/** Priority: daily missions → vision → quarterly missions. */
+/** Clause usable after "You won’t … by …" */
+export function toAccountabilityTarget(visionOrMission: string): string {
+  const phrase = normalizePhrase(visionOrMission);
+  if (!phrase) return 'get the life you want';
+
+  if (/^you will\b/i.test(phrase)) {
+    return normalizePhrase(phrase.replace(/^you will\s+/i, '')).toLowerCase();
+  }
+
+  // Reuse affirmation clause so nouns get a verb ("reach 100 m networth").
+  return toAffirmationClause(phrase);
+}
+
+/** Noun/goal phrase for "You want …" */
+export function toDesirePhrase(visionOrMission: string): string {
+  const phrase = normalizePhrase(visionOrMission);
+  if (!phrase) return 'the life you wrote down';
+
+  const lower = phrase.toLowerCase();
+  if (/^you will\b/i.test(phrase)) {
+    return normalizePhrase(phrase.replace(/^you will\s+/i, '')).toLowerCase();
+  }
+  if (startsWithVerb(phrase)) {
+    // "have peace at home" -> "to have peace at home"
+    return `to ${lower}`;
+  }
+  return lower;
+}
+
+/** Phrase after "toward …" */
+export function toTowardPhrase(visionOrMission: string): string {
+  const phrase = normalizePhrase(visionOrMission);
+  if (!phrase) return 'the life you want';
+
+  const lower = phrase.toLowerCase();
+  if (/^you will\b/i.test(phrase)) {
+    return normalizePhrase(phrase.replace(/^you will\s+/i, '')).toLowerCase();
+  }
+
+  if (startsWithVerb(phrase)) {
+    return lower.replace(
+      /^(get|make|have|build|become|earn|buy|create|find|win|finish|call|close|take|do|wake|start|stop|grow|reach|launch|move|live|run|own|hire|ship|sell|pay|save|invest|train|write|read|send|form)\b/i,
+      (verb) => {
+        const v = verb.toLowerCase();
+        if (v === 'have') return 'having';
+        if (v === 'make') return 'making';
+        if (v === 'wake') return 'waking';
+        if (v.endsWith('e') && !/(ee|oe|ye)$/.test(v)) return `${v.slice(0, -1)}ing`;
+        return `${v}ing`;
+      },
+    );
+  }
+
+  return lower;
+}
+
+export function toAntiBehavior(antiItem: string): string {
+  const phrase = normalizePhrase(antiItem).toLowerCase();
+  if (!phrase) return 'slipping';
+  if (phrase.startsWith('being ')) return phrase.slice(6);
+  if (phrase.startsWith('by ')) return phrase.slice(3);
+  return phrase;
+}
+
 function pickPriorityGoal(ctx: MessageContext): string | undefined {
-  const daily = shuffle(ctx.dailyMissions ?? []);
+  const daily = shuffle((ctx.dailyMissions ?? []).map(normalizePhrase).filter(Boolean));
   if (daily.length > 0) return pick(daily);
 
-  const vision = shuffle(ctx.vision);
+  const vision = shuffle(ctx.vision.map(normalizePhrase).filter(Boolean));
   if (vision.length > 0) return pick(vision);
 
-  const quarterly = shuffle(ctx.quarterlyMissions ?? []);
+  const quarterly = shuffle((ctx.quarterlyMissions ?? []).map(normalizePhrase).filter(Boolean));
   if (quarterly.length > 0) return pick(quarterly);
 
   return undefined;
 }
 
 export function generateAffirmation(ctx: MessageContext): string {
-  const goal = pickPriorityGoal(ctx) ?? pick(shuffle(ctx.vision));
+  const goal = pickPriorityGoal(ctx) ?? pick(shuffle(ctx.vision.map(normalizePhrase).filter(Boolean)));
   if (!goal) {
-    return 'You will become the man you wrote down.';
+    return finalizeSentence('You will become the man you wrote down');
   }
 
-  const outcome = asVisionOutcome(goal);
-  const templates = [
-    () => `You will ${outcome}.`,
-    () => `You will get that ${lower(goal)}.`,
-    () => `That ${lower(goal)} is coming.`,
-    () => `You’re built for ${lower(goal)}.`,
+  const clause = toAffirmationClause(goal);
+  const lowerGoal = normalizePhrase(goal).toLowerCase();
+
+  const templates: Array<() => string> = [
+    () => `You will ${clause}`,
   ];
 
-  return trimMessage(pick(templates)!());
+  // Noun-style alternatives when the item isn't already verb-led.
+  if (!startsWithVerb(goal) && !/^you will\b/i.test(goal)) {
+    templates.push(
+      () => `The ${lowerGoal} is coming`,
+      () => `You’re built for ${lowerGoal}`,
+    );
+  } else {
+    templates.push(() => `You will ${clause}`);
+  }
+
+  return finalizeSentence(softTrim(pick(templates)!()));
 }
 
 export function generateAccountability(ctx: MessageContext): string {
-  const bad = pick(shuffle(ctx.antiVision));
-  const goal =
-    pick(shuffle(ctx.vision)) ??
-    pick(shuffle(ctx.dailyMissions ?? [])) ??
-    pick(shuffle(ctx.quarterlyMissions ?? []));
+  const badRaw = pick(shuffle(ctx.antiVision.map(normalizePhrase).filter(Boolean)));
+  const goalRaw =
+    pick(shuffle(ctx.vision.map(normalizePhrase).filter(Boolean))) ??
+    pick(shuffle((ctx.dailyMissions ?? []).map(normalizePhrase).filter(Boolean))) ??
+    pick(shuffle((ctx.quarterlyMissions ?? []).map(normalizePhrase).filter(Boolean)));
 
-  if (goal && bad) {
-    const outcome = asVisionOutcome(goal);
-    const behavior = asAntiBehavior(bad);
+  const bad = badRaw ? toAntiBehavior(badRaw) : undefined;
+  const target = goalRaw ? toAccountabilityTarget(goalRaw) : undefined;
+  const desire = goalRaw ? toDesirePhrase(goalRaw) : undefined;
+
+  if (target && bad && desire) {
     const templates = [
-      () => `You won’t ${outcome} by ${behavior}.`,
-      () => `You won’t get that ${lower(goal)} by ${behavior}.`,
-      () => `${behavior} doesn’t build ${lower(goal)}.`,
-      () => `Cut the ${behavior}. You want ${lower(goal)}.`,
-      () => `You won’t finish ${lower(goal)} by ${behavior}.`,
+      () => `You won’t ${target} by ${bad}`,
+      () => `Cut the ${bad}. You want ${desire}`,
+      () => `You won’t get there by ${bad}. Stay focused`,
     ];
-    return trimMessage(pick(templates)!());
+    return finalizeSentence(softTrim(pick(templates)!()));
   }
 
   if (bad) {
-    return trimMessage(`You won’t get the life you want by ${asAntiBehavior(bad)}.`);
+    return finalizeSentence(`You won’t get the life you want by ${bad}`);
   }
 
-  if (goal) {
-    return trimMessage(`Stay locked in. ${asVisionOutcome(goal)} needs today’s work.`);
+  if (target) {
+    return finalizeSentence(`Stay locked in. You will ${target}`);
   }
 
-  return 'Hold the line. Excuses don’t build the life you want.';
+  return finalizeSentence('Hold the line. Excuses don’t build the life you want');
 }
 
 const UNIVERSAL_SIDE_QUESTS = [
-  () => 'Side quest: Drink a full glass of water right now.',
-  () => 'Side quest: Stand up and stretch for 60 seconds.',
-  () => 'Side quest: Put your phone face-down for 10 minutes.',
-  () => 'Side quest: Make your bed before you do anything else.',
+  'Side quest: Drink a full glass of water right now',
+  'Side quest: Stand up and stretch for 60 seconds',
+  'Side quest: Put your phone face-down for 10 minutes',
+  'Side quest: Make your bed before you do anything else',
 ];
 
 export function generateSideQuest(ctx: MessageContext): string {
-  const daily = shuffle(ctx.dailyMissions ?? []);
-  const quarterly = shuffle(ctx.quarterlyMissions ?? []);
-  const vision = shuffle(ctx.vision);
-  const bad = pick(shuffle(ctx.antiVision));
+  const daily = shuffle((ctx.dailyMissions ?? []).map(normalizePhrase).filter(Boolean));
+  const quarterly = shuffle((ctx.quarterlyMissions ?? []).map(normalizePhrase).filter(Boolean));
+  const vision = shuffle(ctx.vision.map(normalizePhrase).filter(Boolean));
+  const badRaw = pick(shuffle(ctx.antiVision.map(normalizePhrase).filter(Boolean)));
 
-  const pool: Array<() => string> = [];
+  const pool: string[] = [];
 
-  // 1) Daily missions — highest priority for side quests
   for (const mission of daily.slice(0, 4)) {
-    const m = lower(mission);
-    pool.push(
-      () => `Side quest: ${clean(mission)}.`,
-      () => `Side quest: Next move toward ${m}.`,
-      () => `Next move toward ${m}.`,
-    );
+    const toward = toTowardPhrase(mission);
+    pool.push(`Side quest: ${mission}`);
+    pool.push(`Side quest: Next move toward ${toward}`);
   }
 
-  // 2) Vision items
   for (const goal of vision.slice(0, 3)) {
-    const g = lower(goal);
+    const toward = toTowardPhrase(goal);
     pool.push(
-      () => `Side quest: Next move toward ${g}.`,
-      () => `Side quest: Take one tiny step toward ${g}.`,
+      `Side quest: Take one concrete action in the next hour that moves you toward ${toward}`,
     );
+    pool.push(`Side quest: Next move toward ${toward}`);
   }
 
-  // 3) Quarterly missions
   for (const mission of quarterly.slice(0, 2)) {
-    const m = lower(mission);
-    pool.push(() => `Side quest: Next move toward ${m}.`);
+    pool.push(`Side quest: Next move toward ${toTowardPhrase(mission)}`);
   }
 
-  // Light anti-vision contrast, then universals as fallback
-  if (bad) {
-    const b = asAntiBehavior(bad);
-    pool.push(() => `Side quest: Replace ${b} with one focused minute of work.`);
+  if (badRaw) {
+    const bad = toAntiBehavior(badRaw);
+    pool.push(`Side quest: Replace ${bad} with one focused minute of work`);
   }
 
   if (pool.length === 0) {
-    return trimMessage(pick(UNIVERSAL_SIDE_QUESTS)!());
+    return finalizeSentence(pick(UNIVERSAL_SIDE_QUESTS) ?? UNIVERSAL_SIDE_QUESTS[0]);
   }
 
-  // Prefer mission/vision phrasing; keep a little universal variety.
   const weighted = [...pool, ...shuffle(UNIVERSAL_SIDE_QUESTS).slice(0, 1)];
-  return trimMessage(pick(weighted)!());
+  return finalizeSentence(softTrim(pick(weighted) ?? UNIVERSAL_SIDE_QUESTS[0]));
 }
 
 export function generateTestMessage(
