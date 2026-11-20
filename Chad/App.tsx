@@ -51,8 +51,8 @@ export default function App() {
     const visionRaw = await AsyncStorage.getItem('vision');
     const antiRaw = await AsyncStorage.getItem('antiVision');
 
-    const vision = visionRaw ? JSON.parse(visionRaw) : [];
-    const antiVision = antiRaw ? JSON.parse(antiRaw) : [];
+    const vision: string[] = visionRaw ? JSON.parse(visionRaw) : [];
+    const antiVision: string[] = antiRaw ? JSON.parse(antiRaw) : [];
 
     const message = generateTestMessage(vision, antiVision);
 
@@ -83,12 +83,15 @@ export default function App() {
             }
           }}
         />
-        <Button title="Add" onPress={() => {
-          if (antiInput.trim()) {
-            setAntiList([...antiList, antiInput.trim()]);
-            setAntiInput('');
-          }
-        }} />
+        <Button
+          title="Add"
+          onPress={() => {
+            if (antiInput.trim()) {
+              setAntiList([...antiList, antiInput.trim()]);
+              setAntiInput('');
+            }
+          }}
+        />
         <FlatList
           data={antiList}
           keyExtractor={(item, i) => i.toString()}
@@ -116,12 +119,15 @@ export default function App() {
             }
           }}
         />
-        <Button title="Add" onPress={() => {
-          if (visionInput.trim()) {
-            setVisionList([...visionList, visionInput.trim()]);
-            setVisionInput('');
-          }
-        }} />
+        <Button
+          title="Add"
+          onPress={() => {
+            if (visionInput.trim()) {
+              setVisionList([...visionList, visionInput.trim()]);
+              setVisionInput('');
+            }
+          }}
+        />
         <FlatList
           data={visionList}
           keyExtractor={(item, i) => i.toString()}
@@ -138,9 +144,13 @@ export default function App() {
       <Text style={styles.sub}>Your lists are saved.</Text>
       <Button title="SEND TEST MESSAGE FROM CHAD" onPress={sendRealTest} />
       <Text style={{ marginTop: 30, fontWeight: 'bold' }}>Anti-Vision:</Text>
-      {antiList.map((item, i) => <Text key={i}>• {item}</Text>)}
+      {antiList.map((item, i) => (
+        <Text key={i}>• {item}</Text>
+      ))}
       <Text style={{ marginTop: 20, fontWeight: 'bold' }}>Vision:</Text>
-      {visionList.map((item, i) => <Text key={i}>• {item}</Text>)}
+      {visionList.map((item, i) => (
+        <Text key={i}>• {item}</Text>
+      ))}
     </View>
   );
 }
