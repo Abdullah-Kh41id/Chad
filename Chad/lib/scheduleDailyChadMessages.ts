@@ -11,9 +11,16 @@ const DAILY_SLOTS: { hour: number; minute: number; kind: ChadMessageKind }[] = [
   { hour: 21, minute: 0, kind: 'accountability' },
 ];
 
+const SOON_TEST_SLOTS: { seconds: number; kind: ChadMessageKind }[] = [
+  { seconds: 15, kind: 'affirmation' },
+  { seconds: 45, kind: 'accountability' },
+  { seconds: 90, kind: 'sideQuest' },
+];
+
 export type ScheduleResult = {
   scheduled: number;
   confirmed: number;
+  exampleMessage: string;
 };
 
 async function requestNotificationPermission(): Promise<boolean> {
@@ -21,6 +28,20 @@ async function requestNotificationPermission(): Promise<boolean> {
   if (existingStatus === 'granted') return true;
   const requested = await Notifications.requestPermissionsAsync();
   return requested.status === 'granted';
+}
+
+async function loadVisionLists(): Promise<{ vision: string[]; antiVision: string[] } | null> {
+  const visionRaw = await AsyncStorage.getItem('vision');
+  const antiRaw = await AsyncStorage.getItem('antiVision');
+
+  const vision: string[] = visionRaw ? JSON.parse(visionRaw) : [];
+  const antiVision: string[] = antiRaw ? JSON.parse(antiRaw) : [];
+
+  if (vision.length === 0 && antiVision.length === 0) {
+    return null;
+  }
+
+  return { vision, antiVision };
 }
 
 /**
@@ -31,19 +52,15 @@ export async function scheduleDailyChadMessages(): Promise<ScheduleResult> {
   try {
     const allowed = await requestNotificationPermission();
     if (!allowed) {
-      return { scheduled: 0, confirmed: 0 };
+      return { scheduled: 0, confirmed: 0, exampleMessage: '' };
     }
 
-    const visionRaw = await AsyncStorage.getItem('vision');
-    const antiRaw = await AsyncStorage.getItem('antiVision');
-
-    const vision: string[] = visionRaw ? JSON.parse(visionRaw) : [];
-    const antiVision: string[] = antiRaw ? JSON.parse(antiRaw) : [];
-
-    if (vision.length === 0 && antiVision.length === 0) {
-      return { scheduled: 0, confirmed: 0 };
+    const lists = await loadVisionLists();
+    if (!lists) {
+      return { scheduled: 0, confirmed: 0, exampleMessage: '' };
     }
 
+    const { vision, antiVision } = lists;
     await Notifications.cancelAllScheduledNotificationsAsync();
 
     const bodies: string[] = [];
@@ -51,8 +68,6 @@ export async function scheduleDailyChadMessages(): Promise<ScheduleResult> {
       const body = generateMessageByKind(slot.kind, vision, antiVision);
       bodies.push(body);
 
-      // Same scheduleNotificationAsync path as the working short-delay test.
-      // Requested shape: { hour, minute, repeats: true }. SDK 58 also requires `type`.
       await Notifications.scheduleNotificationAsync({
         content: {
           title: 'Chad',
@@ -72,54 +87,66 @@ export async function scheduleDailyChadMessages(): Promise<ScheduleResult> {
     console.log('[Chad] scheduled daily notifications:', JSON.stringify(all, null, 2));
 
     await saveChadMessages(bodies);
-    return { scheduled: bodies.length, confirmed: all.length };
+    return {
+      scheduled: bodies.length,
+      confirmed: all.length,
+      exampleMessage: bodies[0] ?? '',
+    };
   } catch (error) {
     console.log('[Chad] scheduleDailyChadMessages error:', error);
-    return { scheduled: 0, confirmed: 0 };
+    return { scheduled: 0, confirmed: 0, exampleMessage: '' };
   }
 }
 
 /**
- * Debug helper: schedule three near-term notifications to verify delivery in Expo Go.
+ * Debug helper: schedule three near-term notifications with real generated Chad copy.
  */
-export async function scheduleSoonTestNotifications(): Promise<number> {
+export async function scheduleSoonTestNotifications(): Promise<ScheduleResult> {
   try {
     const allowed = await requestNotificationPermission();
     if (!allowed) {
-      return 0;
+      return { scheduled: 0, confirmed: 0, exampleMessage: '' };
     }
 
+    const lists = await loadVisionLists();
+    if (!lists) {
+      return { scheduled: 0, confirmed: 0, exampleMessage: '' };
+    }
+
+    const { vision, antiVision } = lists;
     await Notifications.cancelAllScheduledNotificationsAsync();
 
-    const tests = [
-      { seconds: 15, body: 'Test message 1 from Chad' },
-      { seconds: 45, body: 'Test message 2 from Chad' },
-      { seconds: 90, body: 'Test message 3 from Chad' },
-    ];
+    const bodies: string[] = [];
+    for (const slot of SOON_TEST_SLOTS) {
+      const body = generateMessageByKind(slot.kind, vision, antiVision);
+      bodies.push(body);
 
-    for (const test of tests) {
       await Notifications.scheduleNotificationAsync({
         content: {
           title: 'Chad',
-          body: test.body,
+          body,
           sound: 'default',
         },
         trigger: {
           type: Notifications.SchedulableTriggerInputTypes.TIME_INTERVAL,
-          seconds: test.seconds,
+          seconds: slot.seconds,
           repeats: false,
         },
       });
     }
 
-    await saveChadMessages(tests.map((test) => test.body));
+    await saveChadMessages(bodies);
 
     const all = await Notifications.getAllScheduledNotificationsAsync();
     console.log('[Chad] soon test scheduled notifications:', JSON.stringify(all, null, 2));
 
-    return tests.length;
+    return {
+      scheduled: bodies.length,
+      confirmed: all.length,
+      exampleMessage: bodies[0] ?? '',
+    };
   } catch (error) {
     console.log('[Chad] scheduleSoonTestNotifications error:', error);
-    return 0;
+    return { scheduled: 0, confirmed: 0, exampleMessage: '' };
   }
 }

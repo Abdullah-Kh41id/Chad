@@ -150,13 +150,15 @@ export default function App() {
 
   const onScheduleDaily = async () => {
     try {
-      const { scheduled, confirmed } = await scheduleDailyChadMessages();
+      const { scheduled, confirmed, exampleMessage } = await scheduleDailyChadMessages();
       await refreshChadMessages();
       if (!scheduled) {
         alert('Could not schedule. Check notification permission and saved lists.');
         return;
       }
-      alert(`${confirmed} daily notifications successfully scheduled`);
+      alert(
+        `${confirmed} daily notifications successfully scheduled\n\nExample: ${exampleMessage}`,
+      );
     } catch {
       alert('Could not schedule. Check notification permission and saved lists.');
     }
@@ -164,15 +166,17 @@ export default function App() {
 
   const onTestScheduleSoon = async () => {
     try {
-      const count = await scheduleSoonTestNotifications();
+      const { scheduled, confirmed, exampleMessage } = await scheduleSoonTestNotifications();
       await refreshChadMessages();
-      if (!count) {
-        alert('Could not schedule test notifications. Check permission.');
+      if (!scheduled) {
+        alert('Could not schedule test notifications. Check permission and saved lists.');
         return;
       }
-      alert('3 test notifications scheduled');
+      alert(
+        `${confirmed || scheduled} test notifications scheduled\n\nExample: ${exampleMessage}`,
+      );
     } catch {
-      alert('Could not schedule test notifications. Check permission.');
+      alert('Could not schedule test notifications. Check permission and saved lists.');
     }
   };
 

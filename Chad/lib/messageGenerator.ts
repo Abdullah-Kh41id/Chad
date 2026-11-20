@@ -35,10 +35,13 @@ export function generateAffirmation(vision: string[], antiVision: string[]): str
 
 export function generateAccountability(vision: string[], antiVision: string[]): string {
   const bad = pick(antiVision);
+  const goal = pick(vision);
+  if (bad && goal) {
+    return `Don’t slide into ${clean(bad)}. Prove today that you will ${clean(goal)}.`;
+  }
   if (bad) {
     return `Don’t slide into ${clean(bad)}. Fix your standards right now.`;
   }
-  const goal = pick(vision);
   if (goal) {
     return `What did you do today that proves you will ${clean(goal)}?`;
   }
