@@ -1,20 +1,16 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import {
-  View,
+  Alert,
+  AppState,
+  NativeScrollEvent,
+  NativeSyntheticEvent,
+  ScrollView,
+  StyleSheet,
   Text,
   TextInput,
-  Button,
-  FlatList,
-  StyleSheet,
-  Pressable,
-  ScrollView,
-  ImageBackground,
-  Dimensions,
-  NativeSyntheticEvent,
-  NativeScrollEvent,
+  useWindowDimensions,
+  View,
 } from 'react-native';
-import { LinearGradient } from 'expo-linear-gradient';
-import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as Notifications from 'expo-notifications';
 import {
   ChadMessage,
@@ -23,27 +19,41 @@ import {
   saveChadMessage,
   saveChadMessages,
 } from './lib/chadMessages';
+import { localDateKey } from './lib/dates';
+import { levelProgress } from './lib/leveling';
 import {
   ChadMessageKind,
   generateMessageByKind,
   generateTestMessage,
 } from './lib/messageGenerator';
 import {
-  scheduleNext24Hours,
-  scheduleSoonTestNotifications,
-} from './lib/scheduleDailyChadMessages';
-import {
-  CATEGORY_LABELS,
   Mission,
   MissionBoard,
   MissionCategory,
-  XP_REWARDS,
   createMission,
+  formatXpRange,
   loadMissionBoard,
   loadTotalXp,
+  rollMissionXp,
   saveMissionBoard,
   saveTotalXp,
 } from './lib/missions';
+import { loadChadProfile, saveAntiVision, saveChadProfile, saveVision } from './lib/profile';
+import { scheduleNext24Hours, scheduleSoonTestNotifications } from './lib/scheduleDailyChadMessages';
+import { recordAppOpen, recordStreakActivity } from './lib/streak';
+import { DayWins, emptyWins, loadTodayWins, saveTodayWins, winsHaveActivity } from './lib/wins';
+import {
+  ChunkButton,
+  GroundDock,
+  LevelUpModal,
+  Parchment,
+  SkyScreen,
+  StreakPlaque,
+  XpPanel,
+  XpToast,
+  colors,
+  ui,
+} from './components/ui';
 
 const PREVIEW_KINDS: ChadMessageKind[] = [
   'affirmation',
@@ -53,8 +63,13 @@ const PREVIEW_KINDS: ChadMessageKind[] = [
   'accountability',
 ];
 
-const PAGE_WIDTH = Dimensions.get('window').width;
 const PAGES = ['home', 'goals', 'messages', 'schedule'] as const;
+
+const CATEGORY_TITLES: Record<MissionCategory, string> = {
+  daily: 'Daily Missions',
+  quarterly: 'Quarterly Missions',
+  year: '1 Year Missions',
+};
 
 Notifications.setNotificationHandler({
   handleNotification: async () => ({
@@ -68,75 +83,127 @@ Notifications.setNotificationHandler({
 type Step = 'anti' | 'vision' | 'main' | 'editAnti' | 'editVision' | 'viewVision' | 'viewAnti';
 type EditTarget = 'antiVision' | 'vision';
 
+const emptyBoard = (): MissionBoard => ({ daily: [], quarterly: [], year: [] });
+
 export default function App() {
+  const { width: pageWidth } = useWindowDimensions();
   const [step, setStep] = useState<Step>('anti');
   const [pageIndex, setPageIndex] = useState(0);
   const [antiInput, setAntiInput] = useState('');
   const [visionInput, setVisionInput] = useState('');
+  const [antiStory, setAntiStory] = useState('');
+  const [visionStory, setVisionStory] = useState('');
   const [antiList, setAntiList] = useState<string[]>([]);
   const [visionList, setVisionList] = useState<string[]>([]);
   const [editDraft, setEditDraft] = useState<string[]>([]);
+  const [editStory, setEditStory] = useState('');
   const [editNewItem, setEditNewItem] = useState('');
   const [chadMessages, setChadMessages] = useState<ChadMessage[]>([]);
-  const [missionBoard, setMissionBoard] = useState<MissionBoard>({
-    daily: [],
-    quarterly: [],
-    year: [],
-  });
+  const [missionBoard, setMissionBoard] = useState<MissionBoard>(emptyBoard);
   const [missionDrafts, setMissionDrafts] = useState<Record<MissionCategory, string>>({
     daily: '',
     quarterly: '',
     year: '',
   });
   const [totalXp, setTotalXp] = useState(0);
+  const [streak, setStreak] = useState(0);
+  const [wins, setWins] = useState<DayWins>(emptyWins);
+  const [winsNote, setWinsNote] = useState('');
+  const [xpToast, setXpToast] = useState<{ amount: number; token: number } | null>(null);
+  const [levelUp, setLevelUp] = useState<number | null>(null);
   const didAutoSchedule = useRef(false);
+  const completing = useRef(new Set<string>());
+  const boardRef = useRef<MissionBoard>(emptyBoard());
+  const xpRef = useRef(0);
+  const winsDate = useRef(localDateKey());
 
   useEffect(() => {
     loadData();
   }, []);
 
   useEffect(() => {
+    const sub = AppState.addEventListener('change', (next) => {
+      if (next === 'active') {
+        refreshIfNewDay();
+      }
+    });
+    return () => sub.remove();
+  }, []);
+
+  useEffect(() => {
     if (step !== 'main') return;
     refreshChadMessages();
-    if (antiList.length === 0 && visionList.length === 0) return;
-    if (didAutoSchedule.current) return;
+    const hasContent =
+      antiList.length > 0 ||
+      visionList.length > 0 ||
+      antiStory.trim().length > 0 ||
+      visionStory.trim().length > 0;
+    if (!hasContent || didAutoSchedule.current) return;
     didAutoSchedule.current = true;
     scheduleNext24Hours().then(() => {
       refreshChadMessages();
     });
-  }, [step, antiList.length, visionList.length]);
+  }, [step, antiList.length, visionList.length, antiStory, visionStory]);
 
   const refreshChadMessages = async () => {
     const messages = await loadChadMessages();
     setChadMessages(messages.slice(0, 10));
   };
 
-  const loadData = async () => {
-    const anti = await AsyncStorage.getItem('antiVision');
-    const vision = await AsyncStorage.getItem('vision');
-    const [messages, board, xp] = await Promise.all([
-      loadChadMessages(),
-      loadMissionBoard(),
-      loadTotalXp(),
-    ]);
-    setChadMessages(messages.slice(0, 10));
-    setMissionBoard(board);
-    setTotalXp(xp);
-    if (anti && vision) {
-      setAntiList(JSON.parse(anti));
-      setVisionList(JSON.parse(vision));
-      setStep('main');
+  const refreshIfNewDay = async () => {
+    const today = localDateKey();
+    const streakData = await recordAppOpen(today);
+    setStreak(streakData.count);
+    if (winsDate.current !== today) {
+      winsDate.current = today;
+      setWins(await loadTodayWins(today));
+      setWinsNote('');
     }
   };
 
+  const loadData = async () => {
+    const today = localDateKey();
+    const [profile, messages, board, xp, streakData, todayWins] = await Promise.all([
+      loadChadProfile(),
+      loadChadMessages(),
+      loadMissionBoard(),
+      loadTotalXp(),
+      recordAppOpen(today),
+      loadTodayWins(today),
+    ]);
+    winsDate.current = today;
+    boardRef.current = board;
+    xpRef.current = xp;
+    setChadMessages(messages.slice(0, 10));
+    setMissionBoard(board);
+    setTotalXp(xp);
+    setStreak(streakData.count);
+    setWins(todayWins);
+    setAntiList(profile.antiVision);
+    setVisionList(profile.vision);
+    setAntiStory(profile.antiStory);
+    setVisionStory(profile.visionStory);
+    if (profile.onboarded) setStep('main');
+  };
+
   const saveAndContinue = async () => {
-    await AsyncStorage.setItem('antiVision', JSON.stringify(antiList));
-    await AsyncStorage.setItem('vision', JSON.stringify(visionList));
+    const profile = {
+      antiStory: antiStory.trim(),
+      visionStory: visionStory.trim(),
+      antiVision: antiList,
+      vision: visionList,
+    };
+    await saveChadProfile(profile);
+    setAntiStory(profile.antiStory);
+    setVisionStory(profile.visionStory);
+    setAntiList(profile.antiVision.map((item) => item.trim()).filter(Boolean));
+    setVisionList(profile.vision.map((item) => item.trim()).filter(Boolean));
     setStep('main');
   };
 
   const openEdit = (target: EditTarget) => {
     setEditDraft(target === 'antiVision' ? [...antiList] : [...visionList]);
+    setEditStory(target === 'antiVision' ? antiStory : visionStory);
     setEditNewItem('');
     setStep(target === 'antiVision' ? 'editAnti' : 'editVision');
   };
@@ -158,17 +225,18 @@ export default function App() {
 
   const saveEdit = async () => {
     const cleaned = editDraft.map((item) => item.trim()).filter(Boolean);
-    const storageKey = step === 'editAnti' ? 'antiVision' : 'vision';
-    await AsyncStorage.setItem(storageKey, JSON.stringify(cleaned));
-
-    if (storageKey === 'antiVision') {
+    const story = editStory.trim();
+    if (step === 'editAnti') {
+      await saveAntiVision(story, cleaned);
       setAntiList(cleaned);
+      setAntiStory(story);
       setEditNewItem('');
       setStep('viewAnti');
       return;
     }
-
+    await saveVision(story, cleaned);
     setVisionList(cleaned);
+    setVisionStory(story);
     setEditNewItem('');
     setStep('viewVision');
   };
@@ -178,56 +246,88 @@ export default function App() {
     setStep(step === 'editAnti' ? 'viewAnti' : 'viewVision');
   };
 
-  const persistBoard = async (next: MissionBoard) => {
-    setMissionBoard(next);
-    await saveMissionBoard(next);
-  };
-
   const addMission = async (category: MissionCategory) => {
     const text = missionDrafts[category].trim();
     if (!text) return;
     const next: MissionBoard = {
-      ...missionBoard,
-      [category]: [createMission(text), ...missionBoard[category]],
+      ...boardRef.current,
+      [category]: [createMission(text), ...boardRef.current[category]],
     };
+    boardRef.current = next;
+    setMissionBoard(next);
     setMissionDrafts((prev) => ({ ...prev, [category]: '' }));
-    await persistBoard(next);
+    await saveMissionBoard(next);
   };
 
   const completeMission = async (category: MissionCategory, missionId: string) => {
-    const target = missionBoard[category].find((mission) => mission.id === missionId);
+    if (completing.current.has(missionId)) return;
+    const target = boardRef.current[category].find((mission) => mission.id === missionId);
     if (!target || target.completed) return;
+    completing.current.add(missionId);
 
-    const reward = XP_REWARDS[category];
+    const reward = rollMissionXp(category);
+    const beforeLevel = levelProgress(xpRef.current).level;
+    const nextXp = xpRef.current + reward;
+    xpRef.current = nextXp;
     const nextBoard: MissionBoard = {
-      ...missionBoard,
-      [category]: missionBoard[category].map((mission) =>
+      ...boardRef.current,
+      [category]: boardRef.current[category].map((mission) =>
         mission.id === missionId ? { ...mission, completed: true } : mission,
       ),
     };
-    const nextXp = totalXp + reward;
+    boardRef.current = nextBoard;
+    setMissionBoard(nextBoard);
     setTotalXp(nextXp);
-    await Promise.all([persistBoard(nextBoard), saveTotalXp(nextXp)]);
-    alert(`+${reward} XP`);
+
+    try {
+      await Promise.all([saveMissionBoard(nextBoard), saveTotalXp(nextXp)]);
+      const nextStreak = await recordStreakActivity();
+      setStreak(nextStreak.count);
+      setXpToast({ amount: reward, token: Date.now() });
+      const afterLevel = levelProgress(nextXp).level;
+      if (afterLevel > beforeLevel) setLevelUp(afterLevel);
+    } finally {
+      completing.current.delete(missionId);
+    }
   };
 
-  const missionExtras = () => ({
-    dailyMissions: missionBoard.daily.filter((m) => !m.completed).map((m) => m.text),
-    quarterlyMissions: missionBoard.quarterly.filter((m) => !m.completed).map((m) => m.text),
+  const saveWins = async () => {
+    const next: DayWins = {
+      mental: wins.mental.trim(),
+      physical: wins.physical.trim(),
+      spiritual: wins.spiritual.trim(),
+    };
+    setWins(next);
+    await saveTodayWins(next);
+    if (winsHaveActivity(next)) {
+      const nextStreak = await recordStreakActivity();
+      setStreak(nextStreak.count);
+      setWinsNote('Saved for today');
+      return;
+    }
+    setWinsNote('Cleared for today');
+  };
+
+  const messageExtras = () => ({
+    dailyMissions: boardRef.current.daily.filter((mission) => !mission.completed).map((mission) => mission.text),
+    quarterlyMissions: boardRef.current.quarterly
+      .filter((mission) => !mission.completed)
+      .map((mission) => mission.text),
   });
 
   const sendRealTest = async () => {
     const { status } = await Notifications.requestPermissionsAsync();
     if (status !== 'granted') {
-      alert('Permission not granted');
+      Alert.alert('Chad', 'Permission not granted');
       return;
     }
 
-    const visionRaw = await AsyncStorage.getItem('vision');
-    const antiRaw = await AsyncStorage.getItem('antiVision');
-    const vision: string[] = visionRaw ? JSON.parse(visionRaw) : [];
-    const antiVision: string[] = antiRaw ? JSON.parse(antiRaw) : [];
-    const message = generateTestMessage(vision, antiVision, missionExtras());
+    const profile = await loadChadProfile();
+    const message = generateTestMessage(profile.vision, profile.antiVision, {
+      ...messageExtras(),
+      visionStory: profile.visionStory,
+      antiVisionStory: profile.antiStory,
+    });
 
     await Notifications.scheduleNotificationAsync({
       content: {
@@ -247,12 +347,12 @@ export default function App() {
       const { scheduled } = await scheduleNext24Hours();
       await refreshChadMessages();
       if (!scheduled) {
-        alert('Could not schedule. Check notification permission and saved lists.');
+        Alert.alert('Chad', 'Could not schedule. Check notification permission and saved lists.');
         return;
       }
-      alert('Scheduled 6 messages from Chad over the next 24 hours');
+      Alert.alert('Chad', 'Scheduled 6 messages from Chad over the next 24 hours');
     } catch {
-      alert('Could not schedule. Check notification permission and saved lists.');
+      Alert.alert('Chad', 'Could not schedule. Check notification permission and saved lists.');
     }
   };
 
@@ -261,123 +361,145 @@ export default function App() {
       const { scheduled, confirmed, exampleMessage } = await scheduleSoonTestNotifications();
       await refreshChadMessages();
       if (!scheduled) {
-        alert('Could not schedule test notifications. Check permission and saved lists.');
+        Alert.alert('Chad', 'Could not schedule test notifications. Check permission and saved lists.');
         return;
       }
-      alert(
+      Alert.alert(
+        'Chad',
         `${confirmed || scheduled} test notifications scheduled\n\nExample: ${exampleMessage}`,
       );
     } catch {
-      alert('Could not schedule test notifications. Check permission and saved lists.');
+      Alert.alert('Chad', 'Could not schedule test notifications. Check permission and saved lists.');
     }
   };
 
   const onGeneratePreview = async () => {
     try {
-      const visionRaw = await AsyncStorage.getItem('vision');
-      const antiRaw = await AsyncStorage.getItem('antiVision');
-      const vision: string[] = visionRaw ? JSON.parse(visionRaw) : [];
-      const antiVision: string[] = antiRaw ? JSON.parse(antiRaw) : [];
-
-      if (vision.length === 0 && antiVision.length === 0) {
-        alert('Add vision or anti-vision items first.');
+      const profile = await loadChadProfile();
+      if (
+        profile.vision.length === 0 &&
+        profile.antiVision.length === 0 &&
+        !profile.visionStory.trim() &&
+        !profile.antiStory.trim()
+      ) {
+        Alert.alert('Chad', 'Add vision or anti-vision items first.');
         return;
       }
 
       const bodies = PREVIEW_KINDS.map((kind) =>
-        generateMessageByKind(kind, vision, antiVision, missionExtras()),
+        generateMessageByKind(kind, profile.vision, profile.antiVision, {
+          ...messageExtras(),
+          visionStory: profile.visionStory,
+          antiVisionStory: profile.antiStory,
+        }),
       );
       const updated = await saveChadMessages(bodies);
       setChadMessages(updated.slice(0, 10));
-      alert(`Preview ready\n\nExample: ${bodies[0]}`);
+      Alert.alert('Chad', `Preview ready\n\nExample: ${bodies[0]}`);
     } catch {
-      alert('Could not generate preview messages.');
+      Alert.alert('Chad', 'Could not generate preview messages.');
     }
   };
 
   const onPagerScroll = (event: NativeSyntheticEvent<NativeScrollEvent>) => {
-    const index = Math.round(event.nativeEvent.contentOffset.x / PAGE_WIDTH);
+    const index = Math.round(event.nativeEvent.contentOffset.x / pageWidth);
     if (index !== pageIndex && index >= 0 && index < PAGES.length) {
       setPageIndex(index);
     }
   };
 
-  const renderCinematicShell = (content: React.ReactNode) => (
-    <ImageBackground
-      source={require('./assets/home-cinematic-bg.jpg')}
-      style={styles.homeScreen}
-      resizeMode="cover"
-    >
-      <LinearGradient
-        colors={['rgba(0,0,0,0.28)', 'rgba(0,0,0,0.32)', 'rgba(0,0,0,0.42)']}
-        locations={[0, 0.55, 1]}
-        style={styles.homeOverlay}
-      >
-        <ScrollView
-          contentContainerStyle={styles.panelContent}
-          keyboardShouldPersistTaps="handled"
-          showsVerticalScrollIndicator={false}
-        >
-          {content}
-        </ScrollView>
-      </LinearGradient>
-    </ImageBackground>
-  );
+  const addBullet = (which: 'anti' | 'vision') => {
+    if (which === 'anti') {
+      const trimmed = antiInput.trim();
+      if (!trimmed) return;
+      setAntiList((prev) => [...prev, trimmed]);
+      setAntiInput('');
+      return;
+    }
+    const trimmed = visionInput.trim();
+    if (!trimmed) return;
+    setVisionList((prev) => [...prev, trimmed]);
+    setVisionInput('');
+  };
 
   const renderMissionCard = (category: MissionCategory, mission: Mission) => (
-    <View key={mission.id} style={styles.missionCard}>
-      <View style={styles.missionBody}>
-        <Text style={[styles.missionText, mission.completed && styles.missionTextDone]}>
-          {mission.completed ? '✓ ' : ''}
-          {mission.text}
-        </Text>
-        <Text style={styles.missionXp}>+{XP_REWARDS[category]} XP</Text>
-      </View>
-      {!mission.completed ? (
-        <Pressable style={styles.completeButton} onPress={() => completeMission(category, mission.id)}>
-          <Text style={styles.completeButtonText}>COMPLETE</Text>
-        </Pressable>
-      ) : (
-        <Text style={styles.missionDoneLabel}>DONE</Text>
+    <Parchment key={mission.id} style={styles.missionCard}>
+      <Text style={[styles.missionText, mission.completed && styles.missionTextDone]}>{mission.text}</Text>
+      <Text style={styles.missionXp}>{mission.completed ? 'DONE' : formatXpRange(category)}</Text>
+      {mission.completed ? null : (
+        <ChunkButton
+          label="COMPLETE"
+          tone="gold"
+          compact
+          onPress={() => completeMission(category, mission.id)}
+        />
       )}
-    </View>
+    </Parchment>
   );
 
   const renderGoalsPage = () => (
     <ScrollView
       style={styles.page}
-      contentContainerStyle={styles.pageScrollContent}
+      contentContainerStyle={styles.pageScroll}
       keyboardShouldPersistTaps="handled"
       showsVerticalScrollIndicator={false}
+      nestedScrollEnabled
     >
-      <Text style={styles.pageTitle}>GOALS / MISSIONS</Text>
-      <View style={styles.xpBadge}>
-        <Text style={styles.xpBadgeText}>TOTAL XP  {totalXp}</Text>
+      <View style={styles.titleRow}>
+        <Text style={[ui.pageTitle, styles.titleGrow]}>Goals</Text>
+        <Text style={styles.miniStreak}>🔥 {streak}</Text>
       </View>
+      <XpPanel totalXp={totalXp} />
+
+      <Text style={[ui.label, styles.sectionGap]}>TODAY'S WINS</Text>
+      <Parchment>
+        <WinField
+          label="Mental win"
+          value={wins.mental}
+          onChangeText={(mental) => {
+            setWins((prev) => ({ ...prev, mental }));
+            setWinsNote('');
+          }}
+        />
+        <WinField
+          label="Physical win"
+          value={wins.physical}
+          onChangeText={(physical) => {
+            setWins((prev) => ({ ...prev, physical }));
+            setWinsNote('');
+          }}
+        />
+        <WinField
+          label="Spiritual win"
+          value={wins.spiritual}
+          onChangeText={(spiritual) => {
+            setWins((prev) => ({ ...prev, spiritual }));
+            setWinsNote('');
+          }}
+        />
+        <ChunkButton label="SAVE WINS" tone="gold" onPress={saveWins} />
+        {winsNote ? <Text style={styles.savedNote}>{winsNote}</Text> : null}
+      </Parchment>
 
       {(['daily', 'quarterly', 'year'] as MissionCategory[]).map((category) => (
         <View key={category} style={styles.missionSection}>
-          <Text style={styles.sectionTitle}>{CATEGORY_LABELS[category].toUpperCase()}</Text>
+          <Text style={ui.label}>{CATEGORY_TITLES[category].toUpperCase()}</Text>
           {missionBoard[category].length === 0 ? (
-            <Text style={styles.chatEmpty}>No missions yet. Add one below.</Text>
+            <Text style={ui.empty}>No missions yet. Add one below.</Text>
           ) : (
             missionBoard[category].map((mission) => renderMissionCard(category, mission))
           )}
-          <View style={styles.addMissionRow}>
+          <View style={styles.addRow}>
             <TextInput
-              style={[styles.editField, styles.addMissionInput]}
+              style={[ui.input, styles.addInput]}
               placeholder="New mission"
-              placeholderTextColor="rgba(255,255,255,0.35)"
+              placeholderTextColor={colors.placeholder}
               value={missionDrafts[category]}
-              onChangeText={(value) =>
-                setMissionDrafts((prev) => ({ ...prev, [category]: value }))
-              }
+              onChangeText={(value) => setMissionDrafts((prev) => ({ ...prev, [category]: value }))}
               onSubmitEditing={() => addMission(category)}
-              selectionColor="#ffffff"
+              maxLength={160}
             />
-            <Pressable style={styles.addMissionButton} onPress={() => addMission(category)}>
-              <Text style={styles.gameButtonText}>ADD</Text>
-            </Pressable>
+            <ChunkButton label="ADD" compact onPress={() => addMission(category)} />
           </View>
         </View>
       ))}
@@ -387,19 +509,19 @@ export default function App() {
   const renderMessagesPage = () => (
     <ScrollView
       style={styles.page}
-      contentContainerStyle={styles.pageScrollContent}
+      contentContainerStyle={styles.pageScroll}
       showsVerticalScrollIndicator={false}
+      nestedScrollEnabled
     >
-      <Text style={styles.pageTitle}>MESSAGES</Text>
+      <Text style={ui.pageTitle}>Messages</Text>
       {chadMessages.length === 0 ? (
-        <Text style={styles.chatEmpty}>No messages yet. Schedule or preview from Schedule.</Text>
+        <Text style={ui.empty}>No messages yet. Schedule or preview from Schedule.</Text>
       ) : (
         chadMessages.map((message) => (
-          <View key={`${message.timestamp}-${message.text}`} style={styles.chatRow}>
-            <View style={styles.chatBubble}>
-              <Text style={styles.chatBubbleText}>{message.text}</Text>
-              <Text style={styles.chatTime}>{formatMessageTime(message.timestamp)}</Text>
-            </View>
+          <View key={`${message.timestamp}-${message.text}`} style={styles.bubble}>
+            <Text style={styles.bubbleName}>CHAD</Text>
+            <Text style={styles.bubbleText}>{message.text}</Text>
+            <Text style={styles.bubbleTime}>{formatMessageTime(message.timestamp)}</Text>
           </View>
         ))
       )}
@@ -407,237 +529,201 @@ export default function App() {
   );
 
   const renderSchedulePage = () => (
-    <View style={[styles.page, styles.schedulePage]}>
-      <Text style={[styles.pageTitle, styles.scheduleTitle]}>SCHEDULE</Text>
-      <View style={styles.scheduleMenu}>
-        <Pressable style={styles.gameButton} onPress={onScheduleNext24Hours}>
-          <Text style={styles.gameButtonText}>SCHEDULE NEXT 24 HOURS</Text>
-        </Pressable>
-        <Pressable style={styles.gameButton} onPress={onTestScheduleSoon}>
-          <Text style={styles.gameButtonText}>TEST SCHEDULE IN 30 SECONDS</Text>
-        </Pressable>
-        <Pressable style={styles.gameButton} onPress={sendRealTest}>
-          <Text style={styles.gameButtonText}>SEND TEST MESSAGE FROM CHAD</Text>
-        </Pressable>
-        <Pressable style={[styles.gameButton, styles.gameButtonLast]} onPress={onGeneratePreview}>
-          <Text style={styles.gameButtonText}>GENERATE & PREVIEW MESSAGES</Text>
-        </Pressable>
-      </View>
-    </View>
+    <ScrollView
+      style={styles.page}
+      contentContainerStyle={styles.pageScroll}
+      showsVerticalScrollIndicator={false}
+      nestedScrollEnabled
+    >
+      <Text style={ui.pageTitle}>Schedule</Text>
+      <Text style={ui.heroSub}>Chad checks in across the next day.</Text>
+      <ChunkButton label="SCHEDULE NEXT 24 HOURS" onPress={onScheduleNext24Hours} />
+      <ChunkButton label="TEST SCHEDULE IN 30 SECONDS" tone="blue" onPress={onTestScheduleSoon} />
+      <ChunkButton label="SEND TEST MESSAGE FROM CHAD" tone="wood" onPress={sendRealTest} />
+      <ChunkButton label="GENERATE & PREVIEW MESSAGES" tone="gold" onPress={onGeneratePreview} />
+    </ScrollView>
   );
 
   const renderHomePage = () => (
-    <View style={[styles.page, styles.homePage]}>
-      <View style={styles.homeTop}>
-        <View style={styles.xpBadge}>
-          <Text style={styles.xpBadgeText}>XP  {totalXp}</Text>
+    <ScrollView
+      style={styles.page}
+      contentContainerStyle={styles.homeScroll}
+      showsVerticalScrollIndicator={false}
+      nestedScrollEnabled
+    >
+      <View>
+        <Text style={styles.wordmark}>CHAD</Text>
+        <Text style={styles.tagline}>Build the man. One day at a time.</Text>
+        <StreakPlaque count={streak} prominent />
+        <View style={styles.xpGap}>
+          <XpPanel totalXp={totalXp} />
         </View>
       </View>
-      <View style={styles.homeNav}>
-        <Pressable style={styles.gameButton} onPress={() => setStep('viewVision')}>
-          <Text style={styles.gameButtonText}>VISION</Text>
-        </Pressable>
-        <Pressable
-          style={[styles.gameButton, styles.gameButtonLast]}
-          onPress={() => setStep('viewAnti')}
-        >
-          <Text style={styles.gameButtonText}>ANTI-VISION</Text>
-        </Pressable>
-        <Text style={styles.swipeHint}>SWIPE FOR GOALS · MESSAGES · SCHEDULE</Text>
+      <View style={styles.homeActions}>
+        <ChunkButton label="VISION" onPress={() => setStep('viewVision')} />
+        <ChunkButton label="ANTI-VISION" tone="wood" onPress={() => setStep('viewAnti')} />
+        <Text style={ui.hint}>SWIPE  ·  GOALS  ·  MESSAGES  ·  SCHEDULE</Text>
       </View>
-    </View>
+    </ScrollView>
   );
 
-  if (step === 'anti') {
+  if (step === 'anti' || step === 'vision') {
+    const isAnti = step === 'anti';
     return (
-      <View style={styles.container}>
-        <Text style={styles.title}>Anti-Vision</Text>
-        <Text style={styles.sub}>What are you refusing to become?</Text>
-        <TextInput
-          style={styles.input}
-          placeholder="Add an item and press Add"
-          value={antiInput}
-          onChangeText={setAntiInput}
-          onSubmitEditing={() => {
-            if (antiInput.trim()) {
-              setAntiList([...antiList, antiInput.trim()]);
-              setAntiInput('');
+      <SkyScreen scroll>
+        <View style={ui.stepPill}>
+          <Text style={ui.stepPillText}>{isAnti ? 'STEP 1 OF 2' : 'STEP 2 OF 2'}</Text>
+        </View>
+        <Text style={ui.heroTitle}>{isAnti ? 'Who are you refusing to become?' : 'Who are you becoming?'}</Text>
+        <Text style={ui.heroSub}>
+          {isAnti
+            ? 'Write the man you will not be. Name the habits, the excuses, and the life you are done living.'
+            : 'Write the man you are building. Then add a few goals you can actually do.'}
+        </Text>
+        <Parchment>
+          <Text style={ui.label}>THE STORY</Text>
+          <TextInput
+            style={[ui.input, ui.story]}
+            multiline
+            placeholder={
+              isAnti
+                ? 'The life you refuse. The man you will not be…'
+                : 'The life you are building, in your own words…'
             }
-          }}
+            placeholderTextColor={colors.placeholder}
+            value={isAnti ? antiStory : visionStory}
+            onChangeText={isAnti ? setAntiStory : setVisionStory}
+            maxLength={2000}
+          />
+        </Parchment>
+        <Text style={ui.label}>{isAnti ? 'SHORT BULLETS · OPTIONAL' : 'SHORT GOALS · OPTIONAL'}</Text>
+        <PlainBullets
+          items={isAnti ? antiList : visionList}
+          onRemove={(index) =>
+            isAnti
+              ? setAntiList((prev) => prev.filter((_, i) => i !== index))
+              : setVisionList((prev) => prev.filter((_, i) => i !== index))
+          }
         />
-        <Button
-          title="Add"
-          onPress={() => {
-            if (antiInput.trim()) {
-              setAntiList([...antiList, antiInput.trim()]);
-              setAntiInput('');
-            }
-          }}
-        />
-        <FlatList
-          data={antiList}
-          keyExtractor={(item, i) => i.toString()}
-          renderItem={({ item }) => <Text style={styles.item}>• {item}</Text>}
-        />
-        <Button title="Next → Vision" onPress={() => setStep('vision')} />
-      </View>
-    );
-  }
-
-  if (step === 'vision') {
-    return (
-      <View style={styles.container}>
-        <Text style={styles.title}>Vision</Text>
-        <Text style={styles.sub}>Who are you becoming?</Text>
-        <TextInput
-          style={styles.input}
-          placeholder="Add an item and press Add"
-          value={visionInput}
-          onChangeText={setVisionInput}
-          onSubmitEditing={() => {
-            if (visionInput.trim()) {
-              setVisionList([...visionList, visionInput.trim()]);
-              setVisionInput('');
-            }
-          }}
-        />
-        <Button
-          title="Add"
-          onPress={() => {
-            if (visionInput.trim()) {
-              setVisionList([...visionList, visionInput.trim()]);
-              setVisionInput('');
-            }
-          }}
-        />
-        <FlatList
-          data={visionList}
-          keyExtractor={(item, i) => i.toString()}
-          renderItem={({ item }) => <Text style={styles.item}>• {item}</Text>}
-        />
-        <Button title="Finish & Save" onPress={saveAndContinue} />
-      </View>
+        <View style={styles.addRow}>
+          <TextInput
+            style={[ui.input, styles.addInput]}
+            placeholder={isAnti ? 'A line you refuse' : 'A goal you can act on'}
+            placeholderTextColor={colors.placeholder}
+            value={isAnti ? antiInput : visionInput}
+            onChangeText={isAnti ? setAntiInput : setVisionInput}
+            onSubmitEditing={() => addBullet(isAnti ? 'anti' : 'vision')}
+            maxLength={140}
+          />
+          <ChunkButton label="ADD" compact onPress={() => addBullet(isAnti ? 'anti' : 'vision')} />
+        </View>
+        {isAnti ? (
+          <ChunkButton label="NEXT" tone="blue" onPress={() => setStep('vision')} />
+        ) : (
+          <ChunkButton label="FINISH & SAVE" tone="gold" onPress={saveAndContinue} />
+        )}
+      </SkyScreen>
     );
   }
 
   if (step === 'editAnti' || step === 'editVision') {
-    const title = step === 'editAnti' ? 'EDIT ANTI-VISION' : 'EDIT VISION';
+    const isAnti = step === 'editAnti';
     return (
-      <View style={styles.editScreen}>
-        <ScrollView
-          contentContainerStyle={styles.editScreenContent}
-          keyboardShouldPersistTaps="handled"
-          showsVerticalScrollIndicator={false}
-        >
-          <Text style={styles.editTitle}>{title}</Text>
-          <Text style={styles.editSub}>Add, edit, or remove items, then Save.</Text>
-
-          <View style={styles.editList}>
-            {editDraft.map((item, index) => (
-              <View key={index} style={styles.editRow}>
-                <TextInput
-                  style={[styles.editField, styles.editInput]}
-                  value={item}
-                  onChangeText={(value) => updateDraftItem(index, value)}
-                  placeholderTextColor="rgba(255,255,255,0.35)"
-                  selectionColor="#ffffff"
-                />
-                <Pressable style={styles.removeButton} onPress={() => removeDraftItem(index)}>
-                  <Text style={styles.removeText}>REMOVE</Text>
-                </Pressable>
-              </View>
-            ))}
-          </View>
-
+      <SkyScreen scroll>
+        <Text style={ui.heroTitle}>{isAnti ? 'Edit anti-vision' : 'Edit vision'}</Text>
+        <Text style={ui.heroSub}>
+          {isAnti
+            ? 'Update the story and the short lines you are refusing.'
+            : 'Update the story and the goals you are chasing.'}
+        </Text>
+        <Parchment>
+          <Text style={ui.label}>THE STORY</Text>
           <TextInput
-            style={styles.editField}
-            placeholder="Add a new item"
-            placeholderTextColor="rgba(255,255,255,0.35)"
+            style={[ui.input, ui.story]}
+            multiline
+            placeholder={isAnti ? 'Who you refuse to become…' : 'Who you are becoming…'}
+            placeholderTextColor={colors.placeholder}
+            value={editStory}
+            onChangeText={setEditStory}
+            maxLength={2000}
+          />
+        </Parchment>
+        <Text style={ui.label}>{isAnti ? 'BULLETS' : 'GOALS'}</Text>
+        {editDraft.map((item, index) => (
+          <View key={`edit-${index}`} style={styles.editRow}>
+            <TextInput
+              style={[ui.input, styles.editInput]}
+              value={item}
+              onChangeText={(value) => updateDraftItem(index, value)}
+              placeholderTextColor={colors.placeholder}
+              maxLength={140}
+            />
+            <ChunkButton label="REMOVE" tone="red" compact onPress={() => removeDraftItem(index)} />
+          </View>
+        ))}
+        <View style={styles.addRow}>
+          <TextInput
+            style={[ui.input, styles.addInput]}
+            placeholder="Add a new line"
+            placeholderTextColor={colors.placeholder}
             value={editNewItem}
             onChangeText={setEditNewItem}
             onSubmitEditing={addDraftItem}
-            selectionColor="#ffffff"
+            maxLength={140}
           />
-
-          <Pressable style={styles.gameButton} onPress={addDraftItem}>
-            <Text style={styles.gameButtonText}>ADD</Text>
-          </Pressable>
-
-          <View style={styles.editActions}>
-            <Pressable style={styles.gameButton} onPress={cancelEdit}>
-              <Text style={styles.gameButtonText}>CANCEL</Text>
-            </Pressable>
-            <Pressable style={[styles.gameButton, styles.gameButtonLast]} onPress={saveEdit}>
-              <Text style={styles.gameButtonText}>SAVE</Text>
-            </Pressable>
-          </View>
-        </ScrollView>
-      </View>
+          <ChunkButton label="ADD" compact onPress={addDraftItem} />
+        </View>
+        <ChunkButton label="CANCEL" tone="wood" onPress={cancelEdit} />
+        <ChunkButton label="SAVE" tone="gold" onPress={saveEdit} />
+      </SkyScreen>
     );
   }
 
-  if (step === 'viewVision') {
-    return renderCinematicShell(
-      <>
-        <Pressable style={[styles.gameButton, styles.backButton]} onPress={() => setStep('main')}>
-          <Text style={styles.gameButtonText}>BACK</Text>
-        </Pressable>
-        <View style={styles.sectionHeader}>
-          <Text style={styles.sectionTitle}>VISION</Text>
-          <Pressable onPress={() => openEdit('vision')} hitSlop={8}>
-            <Text style={styles.editLink}>EDIT</Text>
-          </Pressable>
+  if (step === 'viewVision' || step === 'viewAnti') {
+    const isAnti = step === 'viewAnti';
+    const story = isAnti ? antiStory : visionStory;
+    const items = isAnti ? antiList : visionList;
+    return (
+      <SkyScreen scroll>
+        <ChunkButton label="BACK" tone="wood" compact onPress={() => setStep('main')} style={styles.backButton} />
+        <View style={styles.titleRow}>
+          <Text style={[ui.pageTitle, styles.titleGrow]}>{isAnti ? 'Anti-vision' : 'Vision'}</Text>
+          <ChunkButton
+            label="EDIT"
+            tone="blue"
+            compact
+            onPress={() => openEdit(isAnti ? 'antiVision' : 'vision')}
+          />
         </View>
-        {visionList.length === 0 ? (
-          <Text style={styles.chatEmpty}>No vision items yet.</Text>
+        {story.trim() ? (
+          <Parchment>
+            <Text style={styles.storyBody}>{story}</Text>
+          </Parchment>
+        ) : null}
+        <Text style={ui.label}>{isAnti ? 'BULLETS' : 'GOALS'}</Text>
+        {items.length === 0 ? (
+          <Text style={ui.empty}>{isAnti ? 'No bullets yet.' : 'No goals yet.'}</Text>
         ) : (
-          visionList.map((item, i) => (
-            <View key={`vision-${i}`} style={styles.card}>
-              <Text style={styles.cardBullet}>•</Text>
-              <Text style={styles.cardText}>{item}</Text>
-            </View>
+          items.map((item, index) => (
+            <Parchment key={`${item}-${index}`} style={styles.listCard}>
+              <Text style={styles.listText}>▸ {item}</Text>
+            </Parchment>
           ))
         )}
-      </>,
-    );
-  }
-
-  if (step === 'viewAnti') {
-    return renderCinematicShell(
-      <>
-        <Pressable style={[styles.gameButton, styles.backButton]} onPress={() => setStep('main')}>
-          <Text style={styles.gameButtonText}>BACK</Text>
-        </Pressable>
-        <View style={styles.sectionHeader}>
-          <Text style={styles.sectionTitle}>ANTI-VISION</Text>
-          <Pressable onPress={() => openEdit('antiVision')} hitSlop={8}>
-            <Text style={styles.editLink}>EDIT</Text>
-          </Pressable>
-        </View>
-        {antiList.length === 0 ? (
-          <Text style={styles.chatEmpty}>No anti-vision items yet.</Text>
-        ) : (
-          antiList.map((item, i) => (
-            <View key={`anti-${i}`} style={styles.card}>
-              <Text style={styles.cardBullet}>•</Text>
-              <Text style={styles.cardText}>{item}</Text>
-            </View>
-          ))
-        )}
-      </>,
+      </SkyScreen>
     );
   }
 
   return (
-    <ImageBackground
-      source={require('./assets/home-cinematic-bg.jpg')}
-      style={styles.homeScreen}
-      resizeMode="cover"
-    >
-      <LinearGradient
-        colors={['rgba(0,0,0,0.28)', 'rgba(0,0,0,0.32)', 'rgba(0,0,0,0.42)']}
-        locations={[0, 0.55, 1]}
-        style={styles.homeOverlay}
+    <View style={styles.root}>
+      <SkyScreen
+        footer={
+          <GroundDock>
+            {PAGES.map((page, index) => (
+              <View key={page} style={[styles.dot, index === pageIndex && styles.dotActive]} />
+            ))}
+          </GroundDock>
+        }
       >
         <ScrollView
           horizontal
@@ -648,311 +734,216 @@ export default function App() {
           scrollEventThrottle={16}
           style={styles.pager}
         >
-          <View style={styles.pageSlide}>{renderHomePage()}</View>
-          <View style={styles.pageSlide}>{renderGoalsPage()}</View>
-          <View style={styles.pageSlide}>{renderMessagesPage()}</View>
-          <View style={styles.pageSlide}>{renderSchedulePage()}</View>
+          <View style={[styles.pageSlide, { width: pageWidth }]}>{renderHomePage()}</View>
+          <View style={[styles.pageSlide, { width: pageWidth }]}>{renderGoalsPage()}</View>
+          <View style={[styles.pageSlide, { width: pageWidth }]}>{renderMessagesPage()}</View>
+          <View style={[styles.pageSlide, { width: pageWidth }]}>{renderSchedulePage()}</View>
         </ScrollView>
+      </SkyScreen>
+      <XpToast event={xpToast} />
+      <LevelUpModal level={levelUp} onClose={() => setLevelUp(null)} />
+    </View>
+  );
+}
 
-        <View style={styles.dots}>
-          {PAGES.map((page, index) => (
-            <View
-              key={page}
-              style={[styles.dot, index === pageIndex && styles.dotActive]}
-            />
-          ))}
+function WinField({
+  label,
+  value,
+  onChangeText,
+}: {
+  label: string;
+  value: string;
+  onChangeText: (value: string) => void;
+}) {
+  return (
+    <View style={styles.winField}>
+      <Text style={styles.winLabel}>{label}</Text>
+      <TextInput
+        style={ui.input}
+        placeholder={label}
+        placeholderTextColor={colors.placeholder}
+        value={value}
+        onChangeText={onChangeText}
+        maxLength={120}
+      />
+    </View>
+  );
+}
+
+function PlainBullets({ items, onRemove }: { items: string[]; onRemove: (index: number) => void }) {
+  if (items.length === 0) return null;
+  return (
+    <View style={styles.bulletList}>
+      {items.map((item, index) => (
+        <View key={`${item}-${index}`} style={styles.bulletRow}>
+          <Text style={styles.bulletText}>{item}</Text>
+          <ChunkButton label="REMOVE" tone="red" compact onPress={() => onRemove(index)} />
         </View>
-      </LinearGradient>
-    </ImageBackground>
+      ))}
+    </View>
   );
 }
 
 const styles = StyleSheet.create({
-  container: { flexGrow: 1, padding: 20, paddingTop: 60, paddingBottom: 40 },
-  title: { fontSize: 28, fontWeight: 'bold', marginBottom: 8 },
-  sub: { fontSize: 16, marginBottom: 20, color: '#555' },
-  input: { borderWidth: 1, borderColor: '#ccc', padding: 12, marginBottom: 10, borderRadius: 8 },
-  item: { fontSize: 16, marginVertical: 4 },
-  homeScreen: { flex: 1, backgroundColor: '#0a0a0a' },
-  homeOverlay: { flex: 1 },
+  root: { flex: 1, backgroundColor: colors.skyTop },
   pager: { flex: 1 },
-  pageSlide: { width: PAGE_WIDTH, flex: 1 },
-  page: { flex: 1, width: PAGE_WIDTH },
-  homePage: { justifyContent: 'space-between' },
-  homeTop: {
-    paddingTop: 56,
+  pageSlide: { height: '100%' },
+  page: { flex: 1 },
+  pageScroll: {
     paddingHorizontal: 20,
-    alignItems: 'flex-start',
-  },
-  homeNav: {
-    paddingHorizontal: 20,
+    paddingTop: 58,
     paddingBottom: 28,
   },
-  pageScrollContent: {
-    paddingHorizontal: 20,
-    paddingTop: 56,
-    paddingBottom: 40,
-  },
-  schedulePage: {
-    paddingHorizontal: 20,
-    paddingTop: 56,
-    paddingBottom: 28,
-    justifyContent: 'space-between',
-  },
-  scheduleTitle: {
-    marginBottom: 0,
-  },
-  scheduleMenu: {
-    width: '100%',
-    paddingBottom: 12,
-  },
-  panelContent: {
+  homeScroll: {
     flexGrow: 1,
+    justifyContent: 'space-between',
     paddingHorizontal: 20,
-    paddingTop: 56,
-    paddingBottom: 40,
+    paddingTop: 58,
+    paddingBottom: 16,
   },
-  pageTitle: {
-    fontSize: 16,
+  homeActions: { marginTop: 18 },
+  wordmark: {
+    color: colors.ink,
+    fontSize: 42,
+    fontWeight: '900',
+    letterSpacing: 2,
+  },
+  tagline: {
+    color: colors.inkSoft,
+    fontSize: 15,
     fontWeight: '700',
-    color: '#ffffff',
-    letterSpacing: 2.4,
-    marginBottom: 14,
+    marginBottom: 12,
   },
-  xpBadge: {
-    alignSelf: 'flex-start',
-    backgroundColor: 'rgba(0,0,0,0.55)',
-    borderColor: 'rgba(255,255,255,0.28)',
-    borderWidth: 1,
-    borderRadius: 8,
-    paddingHorizontal: 12,
-    paddingVertical: 8,
-    marginBottom: 18,
+  xpGap: { marginTop: 12 },
+  titleRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 8,
   },
-  xpBadgeText: {
-    color: '#ffffff',
-    fontSize: 12,
-    fontWeight: '700',
-    letterSpacing: 1.6,
+  titleGrow: { flex: 1, marginBottom: 0 },
+  miniStreak: {
+    color: colors.ink,
+    fontSize: 20,
+    fontWeight: '900',
+    marginLeft: 8,
   },
-  swipeHint: {
-    marginTop: 14,
-    color: 'rgba(255,255,255,0.45)',
-    fontSize: 10,
-    letterSpacing: 1.4,
+  sectionGap: { marginTop: 16 },
+  winField: { marginBottom: 10 },
+  winLabel: {
+    color: colors.inkSoft,
+    fontSize: 13,
+    fontWeight: '800',
+    marginBottom: 6,
+  },
+  savedNote: {
+    color: colors.grassDark,
+    fontSize: 13,
+    fontWeight: '800',
     textAlign: 'center',
   },
-  dots: {
-    flexDirection: 'row',
-    justifyContent: 'center',
-    alignItems: 'center',
-    paddingBottom: 18,
-    gap: 8,
-  },
-  dot: {
-    width: 7,
-    height: 7,
-    borderRadius: 4,
-    backgroundColor: 'rgba(255,255,255,0.28)',
-  },
-  dotActive: {
-    backgroundColor: '#ffffff',
-    width: 8,
-    height: 8,
-  },
-  backButton: {
-    alignSelf: 'flex-start',
-    minWidth: 96,
-    marginBottom: 18,
-  },
-  gameButton: {
-    height: 46,
-    backgroundColor: 'rgba(0,0,0,0.55)',
-    borderRadius: 8,
-    borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.28)',
-    paddingHorizontal: 14,
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginBottom: 10,
-  },
-  gameButtonLast: { marginBottom: 0 },
-  gameButtonText: {
-    color: '#ffffff',
-    fontSize: 12,
+  missionSection: { marginBottom: 8 },
+  missionCard: { marginBottom: 10 },
+  missionText: {
+    color: colors.ink,
+    fontSize: 16,
+    lineHeight: 22,
     fontWeight: '700',
-    letterSpacing: 1.4,
-    textTransform: 'uppercase',
   },
-  sectionHeader: {
-    marginTop: 8,
-    marginBottom: 12,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-  },
-  sectionTitle: {
-    fontSize: 12,
-    fontWeight: '700',
-    color: '#ffffff',
-    letterSpacing: 1.8,
-    marginBottom: 10,
-  },
-  editLink: {
-    color: 'rgba(255,255,255,0.85)',
-    fontSize: 11,
-    fontWeight: '700',
-    letterSpacing: 1.6,
-  },
-  card: {
-    backgroundColor: 'rgba(0,0,0,0.5)',
-    borderRadius: 12,
-    paddingVertical: 12,
-    paddingHorizontal: 14,
-    marginBottom: 8,
-    flexDirection: 'row',
-    alignItems: 'flex-start',
-    borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.12)',
-  },
-  cardBullet: { color: 'rgba(255,255,255,0.55)', fontSize: 15, marginRight: 10, marginTop: 1 },
-  cardText: { flex: 1, color: '#ffffff', fontSize: 15, lineHeight: 21 },
-  chatEmpty: { color: 'rgba(255,255,255,0.55)', fontSize: 13, marginBottom: 10 },
-  chatRow: { alignItems: 'flex-start', marginBottom: 10 },
-  chatBubble: {
-    maxWidth: '88%',
-    backgroundColor: 'rgba(0,0,0,0.55)',
-    borderRadius: 14,
-    borderTopLeftRadius: 4,
-    paddingVertical: 11,
-    paddingHorizontal: 13,
-    borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.12)',
-  },
-  chatBubbleText: { color: '#ffffff', fontSize: 14, lineHeight: 20 },
-  chatTime: { color: 'rgba(255,255,255,0.45)', fontSize: 11, marginTop: 6 },
-  missionSection: { marginBottom: 24 },
-  missionCard: {
-    backgroundColor: 'rgba(0,0,0,0.5)',
-    borderRadius: 12,
-    borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.12)',
-    padding: 12,
-    marginBottom: 8,
-  },
-  missionBody: { marginBottom: 10 },
-  missionText: { color: '#ffffff', fontSize: 15, lineHeight: 21 },
   missionTextDone: {
     textDecorationLine: 'line-through',
-    color: 'rgba(180,255,180,0.9)',
+    color: colors.grassDark,
   },
   missionXp: {
-    marginTop: 4,
-    color: 'rgba(255,255,255,0.45)',
-    fontSize: 11,
-    letterSpacing: 1,
+    marginTop: 6,
+    marginBottom: 8,
+    color: colors.goldDark,
+    fontSize: 12,
+    fontWeight: '900',
+    letterSpacing: 0.4,
   },
-  completeButton: {
-    alignSelf: 'flex-start',
-    height: 34,
-    paddingHorizontal: 12,
-    borderRadius: 7,
-    borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.28)',
-    backgroundColor: 'rgba(0,0,0,0.45)',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  completeButtonText: {
-    color: '#ffffff',
-    fontSize: 11,
-    fontWeight: '700',
-    letterSpacing: 1.2,
-  },
-  missionDoneLabel: {
-    color: '#8dff9a',
-    fontSize: 11,
-    fontWeight: '700',
-    letterSpacing: 1.2,
-  },
-  addMissionRow: {
+  addRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    marginTop: 4,
+    marginBottom: 14,
   },
-  addMissionInput: {
-    flex: 1,
-    marginBottom: 0,
-    marginRight: 8,
-  },
-  addMissionButton: {
-    height: 46,
-    minWidth: 72,
-    paddingHorizontal: 12,
-    borderRadius: 8,
-    borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.28)',
-    backgroundColor: 'rgba(0,0,0,0.55)',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  editScreen: {
-    flex: 1,
-    backgroundColor: '#0a0a0a',
-  },
-  editScreenContent: {
-    flexGrow: 1,
-    paddingHorizontal: 20,
-    paddingTop: 56,
-    paddingBottom: 40,
-  },
-  editTitle: {
-    fontSize: 18,
-    fontWeight: '700',
-    color: '#ffffff',
-    letterSpacing: 2,
-    marginBottom: 8,
-  },
-  editSub: {
-    fontSize: 14,
-    color: 'rgba(255,255,255,0.6)',
-    marginBottom: 20,
-  },
-  editList: { marginBottom: 16 },
+  addInput: { flex: 1, marginRight: 8 },
   editRow: {
     flexDirection: 'row',
     alignItems: 'center',
     marginBottom: 10,
   },
-  editField: {
-    backgroundColor: 'rgba(255,255,255,0.06)',
-    borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.22)',
-    borderRadius: 8,
-    paddingHorizontal: 12,
-    paddingVertical: 12,
-    marginBottom: 10,
-    color: '#ffffff',
-    fontSize: 15,
+  editInput: { flex: 1, marginRight: 8 },
+  bulletList: { marginBottom: 8 },
+  bulletRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 8,
   },
-  editInput: {
+  bulletText: {
     flex: 1,
-    marginBottom: 0,
-    marginRight: 10,
-  },
-  removeButton: {
-    paddingHorizontal: 10,
-    paddingVertical: 8,
-    borderRadius: 6,
-    borderWidth: 1,
-    borderColor: 'rgba(198,40,40,0.55)',
-    backgroundColor: 'rgba(198,40,40,0.08)',
-  },
-  removeText: {
-    color: '#ff6b6b',
-    fontSize: 10,
+    color: colors.ink,
+    fontSize: 15,
     fontWeight: '700',
-    letterSpacing: 1.2,
+    marginRight: 8,
   },
-  editActions: { marginTop: 8 },
+  backButton: { marginBottom: 12 },
+  storyBody: {
+    color: colors.ink,
+    fontSize: 17,
+    lineHeight: 24,
+    fontWeight: '600',
+  },
+  listCard: { marginBottom: 8 },
+  listText: {
+    color: colors.ink,
+    fontSize: 16,
+    lineHeight: 22,
+    fontWeight: '700',
+  },
+  bubble: {
+    alignSelf: 'flex-start',
+    maxWidth: '88%',
+    backgroundColor: colors.parchment,
+    borderRadius: 18,
+    borderTopLeftRadius: 6,
+    borderWidth: 3,
+    borderColor: colors.line,
+    paddingVertical: 10,
+    paddingHorizontal: 12,
+    marginBottom: 10,
+  },
+  bubbleName: {
+    color: colors.grassDark,
+    fontSize: 11,
+    fontWeight: '900',
+    letterSpacing: 1,
+    marginBottom: 4,
+  },
+  bubbleText: {
+    color: colors.ink,
+    fontSize: 15,
+    lineHeight: 21,
+    fontWeight: '600',
+  },
+  bubbleTime: {
+    color: colors.inkSoft,
+    fontSize: 11,
+    fontWeight: '700',
+    marginTop: 6,
+  },
+  dot: {
+    width: 10,
+    height: 10,
+    borderRadius: 5,
+    backgroundColor: 'rgba(255, 246, 228, 0.45)',
+    borderWidth: 2,
+    borderColor: colors.line,
+  },
+  dotActive: {
+    width: 12,
+    height: 12,
+    borderRadius: 6,
+    backgroundColor: colors.gold,
+  },
 });

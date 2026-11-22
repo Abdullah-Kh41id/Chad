@@ -15,11 +15,26 @@ export type MissionBoard = {
   year: Mission[];
 };
 
-export const XP_REWARDS: Record<MissionCategory, number> = {
-  daily: 10,
-  quarterly: 50,
-  year: 200,
+/**
+ * XP granted when a mission is completed. Each roll is an integer inside the band:
+ * daily 50–100, quarterly 300–500, yearly 1000–2000.
+ * Existing total XP in AsyncStorage is left as-is; only new completions use these bands.
+ */
+export const XP_RANGES: Record<MissionCategory, { min: number; max: number }> = {
+  daily: { min: 50, max: 100 },
+  quarterly: { min: 300, max: 500 },
+  year: { min: 1000, max: 2000 },
 };
+
+export function rollMissionXp(category: MissionCategory): number {
+  const { min, max } = XP_RANGES[category];
+  return min + Math.floor(Math.random() * (max - min + 1));
+}
+
+export function formatXpRange(category: MissionCategory): string {
+  const { min, max } = XP_RANGES[category];
+  return `${min}–${max} XP`;
+}
 
 export const CATEGORY_LABELS: Record<MissionCategory, string> = {
   daily: 'Daily Missions',

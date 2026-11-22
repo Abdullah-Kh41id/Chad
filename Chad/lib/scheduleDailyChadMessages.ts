@@ -1,8 +1,8 @@
-import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as Notifications from 'expo-notifications';
 import { saveChadMessages } from './chadMessages';
 import { ChadMessageKind, generateMessageByKind } from './messageGenerator';
 import { loadMissionBoard } from './missions';
+import { loadChadProfile } from './profile';
 
 const NEXT_24H_SLOTS: { seconds: number; kind: ChadMessageKind }[] = [
   { seconds: 2 * 60, kind: 'affirmation' },
@@ -32,18 +32,23 @@ async function requestNotificationPermission(): Promise<boolean> {
   return requested.status === 'granted';
 }
 
-async function loadVisionLists(): Promise<{ vision: string[]; antiVision: string[] } | null> {
-  const visionRaw = await AsyncStorage.getItem('vision');
-  const antiRaw = await AsyncStorage.getItem('antiVision');
+async function loadVisionLists(): Promise<{
+  vision: string[];
+  antiVision: string[];
+  visionStory: string;
+  antiVisionStory: string;
+} | null> {
+  const profile = await loadChadProfile();
+  const vision = profile.vision;
+  const antiVision = profile.antiVision;
+  const visionStory = profile.visionStory.trim();
+  const antiVisionStory = profile.antiStory.trim();
 
-  const vision: string[] = visionRaw ? JSON.parse(visionRaw) : [];
-  const antiVision: string[] = antiRaw ? JSON.parse(antiRaw) : [];
-
-  if (vision.length === 0 && antiVision.length === 0) {
+  if (vision.length === 0 && antiVision.length === 0 && !visionStory && !antiVisionStory) {
     return null;
   }
 
-  return { vision, antiVision };
+  return { vision, antiVision, visionStory, antiVisionStory };
 }
 
 async function scheduleOffsetMessages(
@@ -63,7 +68,7 @@ async function scheduleOffsetMessages(
   const dailyMissions = board.daily.filter((m) => !m.completed).map((m) => m.text);
   const quarterlyMissions = board.quarterly.filter((m) => !m.completed).map((m) => m.text);
 
-  const { vision, antiVision } = lists;
+  const { vision, antiVision, visionStory, antiVisionStory } = lists;
   await Notifications.cancelAllScheduledNotificationsAsync();
 
   const now = Date.now();
@@ -73,6 +78,8 @@ async function scheduleOffsetMessages(
     const body = generateMessageByKind(slot.kind, vision, antiVision, {
       dailyMissions,
       quarterlyMissions,
+      visionStory,
+      antiVisionStory,
     });
     bodies.push(body);
     fireTimes.push(now + slot.seconds * 1000);
